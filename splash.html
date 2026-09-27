@@ -1,0 +1,1463 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DEINEI // SYSTEM INITIALIZER</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+JP:wght@400;500;700&family=Shippori+Mincho:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+        /* ==========================================================================
+           CELESTIAL TECHNICAL HUD & SYSTEM SPEC (Planetarium Astrolabe Visual)
+           ========================================================================== */
+        :root {
+            --sky-deep: #06070e;
+            --sky-dark: #0a0b16;
+            --sky-navy: #0f1123;
+            --sky-surface: rgba(15, 17, 35, 0.75);
+
+            --star-white: #ffffff;
+            --star-silver: #94a3b8;
+            --star-dim: #475569;
+            --star-cyan: #7dd3fc;
+            --star-gold: #fde68a;
+
+            --line-subtle: rgba(255, 255, 255, 0.08);
+            --line-medium: rgba(255, 255, 255, 0.16);
+            --line-bright: rgba(255, 255, 255, 0.45);
+
+            --font-display: 'Cinzel', 'Shippori Mincho', serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            --font-jp: 'Noto Sans JP', sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            border-radius: 0px !important; /* 角丸禁止 */
+        }
+
+        html, body {
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            background-color: var(--sky-dark);
+            color: var(--star-white);
+            font-family: var(--font-mono);
+            -webkit-font-smoothing: antialiased;
+            user-select: none;
+        }
+
+        /* 16:9 全画面：静謐な夜空（ダークネイビーグラデーション） */
+        .night-sky-canvas {
+            position: absolute;
+            inset: 0;
+            background: 
+                radial-gradient(ellipse 95% 75% at 50% 25%, var(--sky-navy) 0%, var(--sky-dark) 65%, var(--sky-deep) 100%);
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        /* 背景に散らばる微細な星屑（CSS Stardust） */
+        .stardust-layer {
+            position: absolute;
+            inset: 0;
+            background-image: 
+                radial-gradient(1px 1px at 12% 18%, rgba(255, 255, 255, 0.8) 100%, transparent),
+                radial-gradient(1.5px 1.5px at 28% 42%, rgba(125, 211, 252, 0.9) 100%, transparent),
+                radial-gradient(1px 1px at 45% 12%, rgba(255, 255, 255, 0.6) 100%, transparent),
+                radial-gradient(2px 2px at 62% 28%, rgba(253, 230, 138, 0.85) 100%, transparent),
+                radial-gradient(1px 1px at 78% 15%, rgba(255, 255, 255, 0.7) 100%, transparent),
+                radial-gradient(1px 1px at 88% 38%, rgba(125, 211, 252, 0.75) 100%, transparent),
+                radial-gradient(1.5px 1.5px at 15% 72%, rgba(255, 255, 255, 0.65) 100%, transparent),
+                radial-gradient(1px 1px at 35% 85%, rgba(253, 230, 138, 0.6) 100%, transparent),
+                radial-gradient(1.5px 1.5px at 58% 78%, rgba(255, 255, 255, 0.7) 100%, transparent),
+                radial-gradient(1px 1px at 74% 68%, rgba(125, 211, 252, 0.8) 100%, transparent),
+                radial-gradient(2px 2px at 92% 82%, rgba(255, 255, 255, 0.8) 100%, transparent);
+            background-size: 100% 100%;
+            pointer-events: none;
+            opacity: 0.85;
+        }
+
+        /* 控えめな天球方眼グリッド (極細線) */
+        .sky-grid {
+            position: absolute;
+            inset: 0;
+            background-image: 
+                linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+            background-size: 60px 60px;
+            pointer-events: none;
+            mask-image: radial-gradient(circle at 50% 40%, black 40%, transparent 85%);
+            -webkit-mask-image: radial-gradient(circle at 50% 40%, black 40%, transparent 85%);
+        }
+
+        /* 画面四隅の計測マーカー */
+        .reticle {
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            pointer-events: none;
+            z-index: 10;
+        }
+        .reticle-tl { top: 20px; left: 24px; border-top: 1px solid var(--star-silver); border-left: 1px solid var(--star-silver); }
+        .reticle-tr { top: 20px; right: 24px; border-top: 1px solid var(--star-silver); border-right: 1px solid var(--star-silver); }
+        .reticle-bl { bottom: 20px; left: 24px; border-bottom: 1px solid var(--star-silver); border-left: 1px solid var(--star-silver); }
+        .reticle-br { bottom: 20px; right: 24px; border-bottom: 1px solid var(--star-silver); border-right: 1px solid var(--star-silver); }
+
+        /* 全画面ビューポート */
+        .celestial-viewport {
+            position: relative;
+            z-index: 2;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 32px 56px;
+            transition: opacity 0.5s ease;
+        }
+
+        .celestial-viewport.is-leaving {
+            opacity: 0;
+        }
+
+        /* ==========================================================================
+           HEADER (上部：システム起動ヘッダー ＆ ステータス)
+           ========================================================================== */
+        .obs-header {
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            align-items: center;
+            gap: 28px;
+            border-bottom: 1px solid var(--line-medium);
+            padding-bottom: 14px;
+        }
+
+        .header-title-unit {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .header-seal-logo {
+            width: 22px;
+            height: 22px;
+            object-fit: contain;
+            filter: drop-shadow(0 0 6px rgba(125, 211, 252, 0.7));
+            flex-shrink: 0;
+            user-select: none;
+            pointer-events: none;
+        }
+
+        .obs-seal {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--star-cyan);
+            border: 1px solid rgba(125, 211, 252, 0.4);
+            padding: 2px 8px;
+            letter-spacing: 0.12em;
+        }
+
+        .obs-system-name {
+            font-family: var(--font-display);
+            font-size: 14px;
+            letter-spacing: 0.14em;
+            color: var(--star-white);
+        }
+
+        .header-coord-telemetry {
+            display: flex;
+            gap: 24px;
+            font-size: 10.5px;
+            color: var(--star-silver);
+            letter-spacing: 0.06em;
+        }
+
+        .header-coord-telemetry span strong {
+            color: var(--star-white);
+            font-weight: 500;
+        }
+
+        .header-right-clock {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .status-star-beacon {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            color: var(--star-gold);
+            border: 1px solid rgba(253, 230, 138, 0.3);
+            padding: 3px 10px;
+        }
+
+        .star-sparkle-dot {
+            width: 5px;
+            height: 5px;
+            background-color: var(--star-gold);
+            transform: rotate(45deg);
+            animation: star-pulse 2s infinite ease-in-out;
+        }
+
+        @keyframes star-pulse {
+            0%, 100% { opacity: 0.3; transform: rotate(45deg) scale(0.8); }
+            50% { opacity: 1; transform: rotate(45deg) scale(1.3); }
+        }
+
+        .obs-timer-box {
+            font-size: 11px;
+            color: var(--star-silver);
+            letter-spacing: 0.08em;
+            border: 1px solid var(--line-subtle);
+            padding: 3px 8px;
+        }
+
+        /* ==========================================================================
+           OSS CREDITS TYPOGRAPHY (左右の空きスペースに配置する繊細なタイポグラフィ)
+           ========================================================================== */
+        .oss-credit-panel {
+            position: fixed;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 250px;
+            z-index: 10;
+            pointer-events: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            font-family: var(--font-mono);
+            opacity: 0.45;
+            transition: opacity 0.3s ease;
+        }
+
+        .oss-credit-panel:hover {
+            opacity: 0.95;
+        }
+
+        .oss-credit-panel.left-panel {
+            left: 56px;
+            text-align: left;
+        }
+
+        .oss-credit-panel.right-panel {
+            right: 56px;
+            text-align: right;
+        }
+
+        .oss-section-title {
+            font-size: 8.5px;
+            font-weight: 700;
+            color: var(--star-cyan);
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            border-bottom: 1px solid var(--line-subtle);
+            padding-bottom: 4px;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .oss-credit-panel.right-panel .oss-section-title {
+            justify-content: flex-end;
+        }
+
+        .oss-credit-group {
+            display: flex;
+            flex-direction: column;
+            gap: 13px;
+        }
+
+        .oss-credit-item {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .oss-credit-item .oss-name {
+            font-size: 9.5px;
+            font-weight: 700;
+            color: var(--star-white);
+            letter-spacing: 0.04em;
+        }
+
+        .oss-credit-item .oss-desc {
+            font-size: 8px;
+            color: var(--star-silver);
+            line-height: 1.45;
+            letter-spacing: 0.02em;
+        }
+
+        .oss-credit-item .oss-license {
+            font-size: 7.5px;
+            color: var(--star-dim);
+            letter-spacing: 0.06em;
+        }
+
+        @media (max-width: 1420px) {
+            .oss-credit-panel {
+                display: none;
+            }
+        }
+
+        /* ==========================================================================
+           CENTER: 天球儀リング (ASTROLABE RINGS) & タイトルカード
+           ========================================================================== */
+        .stage-planetarium {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            flex: 1;
+            position: relative;
+        }
+
+        /* 天球儀の同心円・目盛りリング (SVG Celestial Dial) */
+        .astrolabe-rings-svg {
+            position: absolute;
+            width: 720px;
+            height: 720px;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 0;
+            opacity: 0.45;
+        }
+
+        .rotate-outer-ring {
+            animation: slow-orbit 140s linear infinite;
+            transform-origin: center;
+        }
+
+        .rotate-inner-ring {
+            animation: slow-orbit-rev 100s linear infinite;
+            transform-origin: center;
+        }
+
+        @keyframes slow-orbit {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes slow-orbit-rev {
+            from { transform: rotate(360deg); }
+            to { transform: rotate(0deg); }
+        }
+
+        /* ==========================================================================
+           GIANT WIREFRAME SILHOUETTE (右寄り巨大キャラクター風シルエット演出)
+           ========================================================================== */
+        .celestial-giant-backdrop {
+            position: absolute;
+            top: 50%;
+            right: -11vw;
+            transform: translateY(-50%);
+            width: min(88vh, 880px);
+            height: min(88vh, 880px);
+            pointer-events: none;
+            z-index: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: visible;
+        }
+
+        /* 発光・呼吸アニメーションを排した、静謐で上品な立ち絵風シルエット線画 */
+        .giant-silhouette-img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            opacity: 0.22;
+            filter: blur(1.2px);
+            user-select: none;
+            pointer-events: none;
+        }
+
+        @media (max-width: 1300px) {
+            .celestial-giant-backdrop {
+                right: -14vw;
+            }
+        }
+
+        /* 中央のカード */
+        .celestial-hero-deck {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            max-width: 800px;
+            width: 100%;
+        }
+
+        .deck-top-citation {
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            font-size: 10px;
+            color: var(--star-dim);
+            letter-spacing: 0.2em;
+            border-bottom: 1px solid var(--line-subtle);
+            padding-bottom: 6px;
+            margin-bottom: 24px;
+        }
+
+        /* アプリ名：泥濘 (DEINEI) - 主役として強調 */
+        .celestial-title-wrap {
+            margin-top: 14px;
+            margin-bottom: 24px;
+            text-align: center;
+        }
+
+        .celestial-display-title {
+            font-family: var(--font-display);
+            font-size: clamp(34px, 4.4vw, 52px);
+            font-weight: 700;
+            letter-spacing: 0.22em;
+            color: var(--star-white);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            text-shadow: 0 0 24px rgba(255, 255, 255, 0.2);
+        }
+
+        .celestial-display-title .star-glyph {
+            font-size: 0.75em;
+            color: var(--star-gold);
+        }
+
+        .celestial-sub-title {
+            margin-top: 10px;
+            font-family: var(--font-jp);
+            font-size: 13.5px;
+            letter-spacing: 0.18em;
+            color: var(--star-silver);
+        }
+
+        /* Live2D 控えめで洗練された小型バッジ（主張を抑え規約を遵守） */
+        .live2d-badge-unit {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-top: 4px;
+        }
+
+        .live2d-badge-frame {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            border: 1px solid var(--line-medium);
+            padding: 5px 14px;
+            background: rgba(10, 11, 22, 0.75);
+            font-size: 9px;
+            letter-spacing: 0.14em;
+            color: var(--star-dim);
+        }
+
+        .live2d-badge-prefix {
+            color: var(--star-dim);
+            font-size: 8.5px;
+        }
+
+        .live2d-badge-suffix {
+            color: var(--star-cyan);
+            font-weight: 600;
+            font-size: 8.5px;
+        }
+
+        .live2d-svg {
+            width: 110px;
+            height: auto;
+            display: block;
+            opacity: 0.85;
+        }
+
+        /* ==========================================================================
+           BOTTOM: クラスター進捗 ＆ 3並列サーバーノード
+           ========================================================================== */
+        .obs-footer-deck {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            max-width: 880px;
+            width: 100%;
+            margin: 0 auto;
+        }
+
+        /* ステータス表記行 */
+        .calibration-status-line {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            border-bottom: 1px solid var(--line-subtle);
+            padding-bottom: 6px;
+        }
+
+        .calibration-label {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 12.5px;
+            letter-spacing: 0.08em;
+            color: var(--star-white);
+        }
+
+        .calibration-tag {
+            background: rgba(125, 211, 252, 0.15);
+            color: var(--star-cyan);
+            border: 1px solid rgba(125, 211, 252, 0.35);
+            font-size: 10px;
+            padding: 1px 6px;
+            font-weight: 700;
+        }
+
+        .calibration-percent {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--star-gold);
+            letter-spacing: 0.08em;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* プログレスバーフレーム */
+        .calibration-track-frame {
+            height: 10px;
+            border: 1px solid var(--line-medium);
+            padding: 2px;
+            background: rgba(10, 11, 22, 0.9);
+            position: relative;
+        }
+
+        .calibration-bar-fill {
+            height: 100%;
+            width: 20%;
+            background: linear-gradient(90deg, #0284c7 0%, var(--star-cyan) 60%, var(--star-gold) 100%);
+            transition: width 0.6s cubic-bezier(0.2, 0.8, 0.3, 1);
+        }
+
+        .calibration-bar-fill.ready {
+            background: linear-gradient(90deg, #10b981 0%, #6ee7b7 100%);
+        }
+
+        /* 3つの並列サーバーノード・タイル */
+        .obs-nodes-triad {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 12px;
+            margin-top: 4px;
+        }
+
+        .obs-node-tile {
+            border: 1px solid var(--line-subtle);
+            background: rgba(15, 17, 35, 0.55);
+            padding: 10px 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: border-color 0.25s, background-color 0.25s;
+        }
+
+        .obs-node-tile.active {
+            border-color: rgba(125, 211, 252, 0.4);
+        }
+
+        .obs-node-tile.ready {
+            border-color: var(--star-cyan);
+            background: rgba(15, 23, 42, 0.85);
+        }
+
+        .node-tile-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .node-sector-tag {
+            font-size: 9px;
+            color: var(--star-dim);
+            letter-spacing: 0.1em;
+        }
+
+        .node-main-label {
+            font-family: var(--font-jp);
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--star-white);
+            letter-spacing: 0.04em;
+        }
+
+        .node-endpoint-spec {
+            font-size: 10px;
+            color: var(--star-silver);
+        }
+
+        .node-state-indicator {
+            font-size: 9.5px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border: 1px solid var(--star-dim);
+            color: var(--star-silver);
+            letter-spacing: 0.06em;
+        }
+
+        .obs-node-tile.active .node-state-indicator {
+            border-color: var(--star-gold);
+            color: var(--star-gold);
+        }
+
+        .obs-node-tile.ready .node-state-indicator {
+            background: var(--star-cyan);
+            color: var(--sky-dark);
+            border-color: var(--star-cyan);
+        }
+
+        /* ==========================================================================
+           GEEK TELEMETRY HUD (深層テレメトリ・コンソール)
+           ========================================================================== */
+        /* ==========================================================================
+           GEEK TELEMETRY HUD (深層テレメトリ・コンソール) - Sci-Fi FUI Spec
+           ========================================================================== */
+        .obs-console-toggle {
+            position: fixed;
+            bottom: 24px;
+            right: 56px;
+            z-index: 100;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(10, 11, 24, 0.88);
+            border: 1px solid var(--line-medium);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            color: var(--star-silver);
+            padding: 8px 18px;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            cursor: pointer;
+            outline: none;
+            transition: all 0.25s ease;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        }
+
+        .toggle-pulse-led {
+            width: 6px;
+            height: 6px;
+            background: var(--star-cyan);
+            box-shadow: 0 0 8px var(--star-cyan);
+            animation: led-pulse 2s infinite ease-in-out;
+            flex-shrink: 0;
+        }
+
+        @keyframes led-pulse {
+            0%, 100% { opacity: 0.4; transform: scale(0.9); }
+            50% { opacity: 1; transform: scale(1.15); box-shadow: 0 0 12px var(--star-cyan); }
+        }
+
+        .obs-console-toggle:hover {
+            color: var(--star-white);
+            border-color: var(--star-cyan);
+            background: rgba(15, 23, 42, 0.95);
+            box-shadow: 0 0 15px rgba(125, 211, 252, 0.25);
+        }
+
+        .obs-console-toggle.is-open {
+            color: var(--star-gold);
+            border-color: var(--star-gold);
+            background: rgba(15, 17, 35, 0.98);
+        }
+
+        /* ギークHUDドロワー (Sci-Fi FUI Panel) */
+        .obs-hud-drawer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 90;
+            background: rgba(6, 8, 18, 0.96);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-top: 1px solid var(--star-cyan);
+            box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.8), 0 0 15px rgba(125, 211, 252, 0.15);
+            padding: 18px 56px 26px;
+            transform: translateY(105%);
+            transition: transform 0.35s cubic-bezier(0.1, 0.9, 0.2, 1);
+        }
+
+        .obs-hud-drawer.is-open {
+            transform: translateY(0);
+        }
+
+        .hud-top-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--line-medium);
+            padding-bottom: 8px;
+            margin-bottom: 10px;
+        }
+
+        .hud-top-title {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            color: var(--star-white);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .hud-top-title span.tag {
+            background: rgba(125, 211, 252, 0.18);
+            border: 1px solid rgba(125, 211, 252, 0.4);
+            color: var(--star-cyan);
+            padding: 2px 7px;
+            font-size: 10px;
+            letter-spacing: 0.14em;
+        }
+
+        .hud-live-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 9.5px;
+            color: #34d399;
+            background: rgba(52, 211, 153, 0.12);
+            border: 1px solid rgba(52, 211, 153, 0.35);
+            padding: 1px 6px;
+            letter-spacing: 0.08em;
+        }
+
+        .hud-live-pill .live-dot {
+            width: 5px;
+            height: 5px;
+            background: #34d399;
+            box-shadow: 0 0 6px #34d399;
+            animation: led-pulse 1.6s infinite ease-in-out;
+        }
+
+        .hud-top-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .hud-rate-spec {
+            font-size: 10px;
+            color: var(--star-silver);
+            letter-spacing: 0.08em;
+        }
+
+        .hud-rate-spec strong {
+            color: var(--star-cyan);
+        }
+
+        .hud-close-btn {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--line-medium);
+            color: var(--star-silver);
+            font-family: var(--font-mono);
+            font-size: 10.5px;
+            cursor: pointer;
+            padding: 3px 12px;
+            letter-spacing: 0.08em;
+            transition: all 0.2s;
+        }
+
+        .hud-close-btn:hover {
+            color: var(--star-white);
+            border-color: var(--star-cyan);
+            background: rgba(125, 211, 252, 0.1);
+        }
+
+        /* ターミナルスクリーン（CRT走査線 + ビネット影） */
+        .hud-stream-screen {
+            position: relative;
+            background: 
+                linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%),
+                rgba(3, 4, 10, 0.94);
+            background-size: 100% 3px;
+            border: 1px solid var(--line-medium);
+            box-shadow: inset 0 0 35px rgba(0, 0, 0, 0.85), 0 0 20px rgba(0, 0, 0, 0.5);
+            padding: 14px 18px;
+            height: 195px;
+            overflow-y: auto;
+            font-size: 11px;
+            line-height: 1.8;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .log-entry {
+            display: flex;
+            align-items: baseline;
+            gap: 12px;
+            font-family: var(--font-mono);
+            letter-spacing: 0.02em;
+        }
+
+        .log-entry.new-entry {
+            animation: entry-flash 0.5s ease-out;
+        }
+
+        @keyframes entry-flash {
+            0% { background: rgba(125, 211, 252, 0.2); transform: translateX(2px); }
+            100% { background: transparent; transform: translateX(0); }
+        }
+
+        .entry-t {
+            color: var(--star-dim);
+            font-size: 10.5px;
+            flex-shrink: 0;
+            letter-spacing: 0.04em;
+        }
+
+        .entry-body {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            word-break: break-all;
+        }
+
+        /* ログバッジ（高密度HUDデザイン） */
+        .log-badge {
+            display: inline-block;
+            font-size: 9px;
+            font-weight: 700;
+            padding: 1px 5px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            flex-shrink: 0;
+            border: 1px solid transparent;
+        }
+
+        .log-badge.sys {
+            color: var(--star-cyan);
+            border-color: rgba(125, 211, 252, 0.4);
+            background: rgba(125, 211, 252, 0.1);
+        }
+
+        .log-badge.init {
+            color: var(--star-silver);
+            border-color: rgba(148, 163, 184, 0.3);
+            background: rgba(148, 163, 184, 0.08);
+        }
+
+        .log-badge.llm {
+            color: var(--star-gold);
+            border-color: rgba(253, 230, 138, 0.45);
+            background: rgba(253, 230, 138, 0.1);
+        }
+
+        .log-badge.tts {
+            color: #c084fc;
+            border-color: rgba(192, 132, 252, 0.45);
+            background: rgba(192, 132, 252, 0.1);
+        }
+
+        .log-badge.flask {
+            color: #34d399;
+            border-color: rgba(52, 211, 153, 0.45);
+            background: rgba(52, 211, 153, 0.1);
+        }
+
+        .log-badge.default {
+            color: var(--star-silver);
+            border-color: var(--line-medium);
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        .log-text {
+            color: var(--star-silver);
+        }
+
+        .log-entry.ok .log-text {
+            color: var(--star-white);
+            font-weight: 500;
+        }
+
+        .log-entry.gold .log-text {
+            color: var(--star-gold);
+        }
+
+        /* ターミナル常駐カーソル行 */
+        .cursor-row {
+            margin-top: 2px;
+            opacity: 0.7;
+        }
+
+        .terminal-cursor {
+            color: var(--star-cyan);
+            font-size: 11px;
+            line-height: 1;
+            animation: cursor-blink 1s steps(2, start) infinite;
+        }
+
+        @keyframes cursor-blink {
+            to { visibility: hidden; }
+        }
+
+        .cursor-label {
+            font-size: 9.5px;
+            color: var(--star-dim);
+            letter-spacing: 0.12em;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            * {
+                animation: none !important;
+                transition: none !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- 夜空キャンバス ＆ 星屑レイヤー -->
+    <div class="night-sky-canvas">
+        <div class="stardust-layer"></div>
+        <div class="sky-grid"></div>
+    </div>
+
+    <!-- 画面四隅の計測マーカー -->
+    <div class="reticle reticle-tl"></div>
+    <div class="reticle reticle-tr"></div>
+    <div class="reticle reticle-bl"></div>
+    <div class="reticle reticle-br"></div>
+
+    <!-- 左側 OSS クレジット（AI推論・基底モデル・ベクトル記憶） -->
+    <aside class="oss-credit-panel left-panel" aria-label="Open Source Credits Left">
+        <div class="oss-credit-group">
+            <div class="oss-section-title">
+                <span>✦</span>
+                <span>CORE INFERENCE & EMBEDDING</span>
+            </div>
+            
+            <div class="oss-credit-item">
+                <div class="oss-name">llama.cpp (b9873)</div>
+                <div class="oss-desc">High-performance LLM inference engine & GGUF tensor framework</div>
+                <div class="oss-license">MIT License © ggml-org</div>
+            </div>
+
+            <div class="oss-credit-item">
+                <div class="oss-name">Melody1437-26B-A4B-GGUF</div>
+                <div class="oss-desc">Base: Gemma-4-26B-A4B by Google DeepMind / RP Fine-tune by ReadyArt</div>
+                <div class="oss-license">Apache 2.0 License</div>
+            </div>
+
+            <div class="oss-credit-item">
+                <div class="oss-name">ruri-v3-310m</div>
+                <div class="oss-desc">Dense Japanese text embedding model for Parent-Child RAG</div>
+                <div class="oss-license">Apache 2.0 © cl-nagoya</div>
+            </div>
+
+            <div class="oss-credit-item">
+                <div class="oss-name">ChromaDB</div>
+                <div class="oss-desc">Embedded vector database for long-term episode retrieval</div>
+                <div class="oss-license">Apache 2.0 License</div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- 右側 OSS クレジット（UI・アバター・音声合成・検索） -->
+    <aside class="oss-credit-panel right-panel" aria-label="Open Source Credits Right">
+        <div class="oss-credit-group">
+            <div class="oss-section-title">
+                <span>CLIENT RUNTIME & SPEECH</span>
+                <span>✦</span>
+            </div>
+
+            <div class="oss-credit-item">
+                <div class="oss-name">Svelte 5 & Vite</div>
+                <div class="oss-desc">Next-generation reactive UI architecture & bundler</div>
+                <div class="oss-license">MIT License</div>
+            </div>
+
+            <div class="oss-credit-item">
+                <div class="oss-name">PixiJS & pixi-live2d-display</div>
+                <div class="oss-desc">WebGL 2D rendering pipeline & Live2D Cubism runtime</div>
+                <div class="oss-license">MIT License</div>
+            </div>
+
+            <div class="oss-credit-item">
+                <div class="oss-name">Live2D® Cubism SDK</div>
+                <div class="oss-desc">Cubism 4 Core SDK (Non-Commercial Content License)</div>
+                <div class="oss-license">© Live2D Inc.</div>
+            </div>
+
+            <div class="oss-credit-item">
+                <div class="oss-name">Irodori-TTS-v4-Small</div>
+                <div class="oss-desc">Real-time float8 quantized character voice synthesis</div>
+                <div class="oss-license">MIT License © Aratako</div>
+            </div>
+
+            <div class="oss-credit-item">
+                <div class="oss-name">duckduckgo_search</div>
+                <div class="oss-desc">Live web retrieval bridge for temporal awareness</div>
+                <div class="oss-license">MIT License</div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- 16:9 全画面モニター -->
+    <div class="celestial-viewport" id="celestialViewport">
+        
+        <!-- 上部：システム起動ヘッダー -->
+        <header class="obs-header">
+            <div class="header-title-unit">
+                <img src="backend/llama.cpp-b9873/tools/ui/static/DLogo.png" alt="DEINEI Logo" class="header-seal-logo" onerror="this.style.display='none'" />
+                <span class="obs-seal">DEINEI CORE</span>
+                <span class="obs-system-name">DEINEI // RUNTIME CLUSTER</span>
+            </div>
+
+            <div class="header-coord-telemetry">
+                <span>ARCHITECTURE: <strong>DISTRIBUTED</strong></span>
+                <span>TARGET: <strong>127.0.0.1:8080</strong></span>
+                <span>LLM: <strong>Melody1437 (26B)</strong></span>
+            </div>
+
+            <div class="header-right-clock">
+                <div class="status-star-beacon">
+                    <span class="star-sparkle-dot"></span>
+                    <span id="beaconStatusText">INITIALIZING</span>
+                </div>
+                <div class="obs-timer-box">
+                    <span id="elapsedTimer">0.0s</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- 中央：天球儀リング (ASTROLABE RINGS) & タイトルカード -->
+        <main class="stage-planetarium">
+            
+            <!-- 天球儀の同心円・目盛りリング (SVG) -->
+            <svg class="astrolabe-rings-svg" viewBox="0 0 600 600">
+                <!-- 外周リング（角度目盛り） -->
+                <g class="rotate-outer-ring">
+                    <circle cx="300" cy="300" r="280" stroke="rgba(255,255,255,0.12)" stroke-width="1" fill="none" />
+                    <circle cx="300" cy="300" r="274" stroke="rgba(255,255,255,0.06)" stroke-width="1" stroke-dasharray="3 6" fill="none" />
+                    <!-- 四方のマーカー -->
+                    <line x1="300" y1="12" x2="300" y2="28" stroke="rgba(253,230,138,0.7)" stroke-width="1.5" />
+                    <line x1="300" y1="572" x2="300" y2="588" stroke="rgba(253,230,138,0.7)" stroke-width="1.5" />
+                    <line x1="12" y1="300" x2="28" y2="300" stroke="rgba(253,230,138,0.7)" stroke-width="1.5" />
+                    <line x1="572" y1="300" x2="588" y2="300" stroke="rgba(253,230,138,0.7)" stroke-width="1.5" />
+                </g>
+
+                <!-- 中周リング（黄道・赤道傾斜） -->
+                <g class="rotate-inner-ring">
+                    <circle cx="300" cy="300" r="210" stroke="rgba(125,211,252,0.18)" stroke-width="1" stroke-dasharray="8 8" fill="none" />
+                    <circle cx="300" cy="300" r="140" stroke="rgba(255,255,255,0.08)" stroke-width="1" fill="none" />
+                </g>
+
+                <!-- 星座の結線 (Constellation Vector) -->
+                <path d="M 210 230 L 260 210 L 340 240 L 390 200" stroke="rgba(255,255,255,0.18)" stroke-width="1" fill="none" />
+                <circle cx="210" cy="230" r="2" fill="#7dd3fc" />
+                <circle cx="260" cy="210" r="2.5" fill="#fde68a" />
+                <circle cx="340" cy="240" r="2" fill="#ffffff" />
+                <circle cx="390" cy="200" r="2.5" fill="#7dd3fc" />
+            </svg>
+
+            <!-- 背景：右寄り巨大キャラクター風シルエット (Giant Wireframe Character Silhouette) -->
+            <div class="celestial-giant-backdrop" aria-hidden="true">
+                <img src="backend/llama.cpp-b9873/tools/ui/static/DLogo_outline.png" alt="" class="giant-silhouette-img" onerror="this.style.display='none'" />
+            </div>
+
+            <!-- 中央カード -->
+            <div class="celestial-hero-deck">
+                <div class="deck-top-citation">
+                    <span>SUBSYSTEM // ARCHITECTURE: DISTRIBUTED</span>
+                    <span>INTERFACE // LLAMA.CPP WEB UI (SVELTE 5)</span>
+                    <span>BACKEND // FLASK + CHROMADB</span>
+                </div>
+
+                <!-- メインタイトル：泥濘 (DEINEI) を主役に -->
+                <div class="celestial-title-wrap">
+                    <h1 class="celestial-display-title">
+                        <span>泥濘 (DEINEI)</span>
+                        <span class="star-glyph">✦</span>
+                    </h1>
+                    <p class="celestial-sub-title">システム初期化 ＆ サーバークラスター起動シーケンス</p>
+                </div>
+
+                <!-- 控えめで洗練された Live2D 規約対応小型バッジ（主役を邪魔しない） -->
+                <div class="live2d-badge-unit">
+                    <div class="live2d-badge-frame">
+                        <span class="live2d-badge-prefix">POWERED BY</span>
+                        <svg class="live2d-svg" viewBox="0 0 1000 256.7" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Live2D Cubism Official Logo">
+                            <defs>
+                                <style>
+                                    .l2d-star-fill { fill: #ffffff; }
+                                    .l2d-star-cyan { fill: #7dd3fc; }
+                                </style>
+                            </defs>
+                            <path class="l2d-star-fill" d="M758.56,116.82c4.81-.82,7.47-5.06,7.21-9.91s-3.93-8.26-7.42-8.26H690c-.51,0-.8-.36-.8-1.05V87.05c0-.67.42-.94,1.14-.94l71.59,0a19.56,19.56,0,0,1,18.29,13.61c2.92,9.14,1.73,27-15.65,29.88-6.78,1.13-16,2.36-32,5.44-10.25,2-16.82,4.36-20.48,7.6-4.94,4.38-6.44,7.05-6.44,15.45,0,.62.25.82.76.82h73.7a1.17,1.17,0,0,1,1.26,1.31v10A1.18,1.18,0,0,1,780,171.4l-89.8,0,0,0a1.1,1.1,0,0,1-1.12-1.15V159.4c0-10.19,1.48-17,7.55-23.33,6.62-6.91,16.47-11.16,35.17-14.66C741.27,119.65,751.29,118.05,758.56,116.82Zm-410.74,42a1,1,0,0,1-1.09-1.09V87a1,1,0,0,0-1.09-1.08H332.17A1,1,0,0,0,331.09,87v83.35a1,1,0,0,0,1.08,1.09h80.46c.94,0,1.29-.45,1.29-1.11V159.91c0-.83-.45-1-1.18-1ZM456,171.4a1.16,1.16,0,0,0,1.23-1.29V126.46c0-.72-.6-1.08-1.32-1.08H442.63a1,1,0,0,0-1.09,1.08v43.85c0,.72.36,1.09.94,1.09Zm-14.41-56.78a1,1,0,0,0,1.09,1.08h13.46a1,1,0,0,0,1.09-1.08V101.54a1,1,0,0,0-1.09-1.08H442.63a1,1,0,0,0-1.09,1.08Zm83.29,56.78,38.62-70c.35-.64.11-.91-.46-.91H549c-.72,0-.83,0-1.19.65L524.7,143c-.18.32-.31.49-.64.49s-.48-.17-.65-.49l-23.08-41.81c-.36-.64-.53-.72-1.26-.72h-14c-.54,0-.73.44-.42,1l38.6,70A.85.85,0,0,0,524.83,171.4Zm118.4-31.86h12.7a.43.43,0,0,1,.47.53A37.35,37.35,0,1,1,649,113.34c.23.31.42.61,0,1l-41.54,41.54c-.21.21-.21.45,0,.59A23.64,23.64,0,0,0,642.63,140,.55.55,0,0,1,643.23,139.54Zm-14.35-25.23A23.69,23.69,0,0,0,595.57,136a23,23,0,0,0,2,9.6c.16.34.36.41.64.12L629,114.93C629.24,114.72,629.18,114.45,628.88,114.31ZM812,87.45a1.31,1.31,0,0,1,1.32-1.31h54.17c18,0,26.26,3.5,34.66,11s12.6,18.17,12.6,31.65-4.21,24.19-12.6,31.65-16.64,11-34.66,11H813.3a1.31,1.31,0,0,1-1.32-1.32Zm15.73,69.64c0,1.18.59,1.8,1.53,1.8H870.6c18.6,0,28.16-11.13,28.16-30.14s-9.56-30.1-28.16-30.1H829.24c-.94,0-1.53.62-1.53,1.8Z" />
+                            <path class="l2d-star-cyan" d="M86.08,90.07a.62.62,0,0,0-.81.63v78.83a.44.44,0,0,0,.72.41L101.24,161a1.59,1.59,0,0,0,.72-1.25V94.85a1.11,1.11,0,0,0-.8-1Z" />
+                            <path class="l2d-star-cyan" d="M112.22,63.34a.7.7,0,0,0-1,.7V198.63c0,.61.41.83.92.49l28-18.72a2.3,2.3,0,0,0,.92-1.71V75.93a1.74,1.74,0,0,0-1-1.51Z" />
+                            <path class="l2d-star-cyan" d="M227,181.22a3.88,3.88,0,0,1-1.3,2.68L176,222.81c-.72.56-1.3.28-1.3-.63V40.49c0-.91.63-1.26,1.4-.77l49.49,31.13a3.36,3.36,0,0,1,1.4,2.54Z" />
+                            <path class="l2d-star-fill" d="M999,1v254.7H1V1H999m1-1H0v256.7H1000V0Z" />
+                        </svg>
+                        <span class="live2d-badge-suffix">CUBISM 4 SDK</span>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+
+        <!-- 下部：クラスター進捗 ＆ 3並列サーバーノード -->
+        <footer class="obs-footer-deck">
+            
+            <div class="calibration-status-line">
+                <div class="calibration-label">
+                    <span class="calibration-tag">CLUSTER STATUS</span>
+                    <span id="friendlyStatusText">各サーバーノードの起動状況を確認中...</span>
+                </div>
+                <div class="calibration-percent" id="progressPercent">20%</div>
+            </div>
+
+            <!-- プログレスバー -->
+            <div class="calibration-track-frame">
+                <div class="calibration-bar-fill" id="progressBarFill"></div>
+            </div>
+
+            <!-- 3つの並列サーバーノード・タイル -->
+            <div class="obs-nodes-triad">
+                <!-- 01: LLM Engine -->
+                <div class="obs-node-tile active" id="tileLlm">
+                    <div class="node-tile-meta">
+                        <span class="node-sector-tag">// SERVER_01</span>
+                        <span class="node-main-label">LLM推論エンジン (llama.cpp)</span>
+                        <span class="node-endpoint-spec">:8080 · llama-server</span>
+                    </div>
+                    <span class="node-state-indicator" id="tagLlm">INITIALIZING</span>
+                </div>
+
+                <!-- 02: TTS Engine -->
+                <div class="obs-node-tile active" id="tileTts">
+                    <div class="node-tile-meta">
+                        <span class="node-sector-tag">// SERVER_02</span>
+                        <span class="node-main-label">TTS音声合成 (Irodori-TTS)</span>
+                        <span class="node-endpoint-spec">:5001 · TTS Server</span>
+                    </div>
+                    <span class="node-state-indicator" id="tagTts">INITIALIZING</span>
+                </div>
+
+                <!-- 03: Flask Server -->
+                <div class="obs-node-tile active" id="tileFlask">
+                    <div class="node-tile-meta">
+                        <span class="node-sector-tag">// SERVER_03</span>
+                        <span class="node-main-label">Flaskサーバー (Backend)</span>
+                        <span class="node-endpoint-spec">:5000 · Python Flask</span>
+                    </div>
+                    <span class="node-state-indicator" id="tagFlask">INITIALIZING</span>
+                </div>
+            </div>
+
+        </footer>
+
+    </div>
+
+    <!-- ==========================================================================
+         GEEK CONSOLE TOGGLE & HUD DRAWER (深層テレメトリ・コンソール)
+         ========================================================================== -->
+    <button class="obs-console-toggle" id="geekToggleBtn" aria-expanded="false" aria-controls="geekDrawer">
+        <span class="toggle-pulse-led"></span>
+        <span>システム詳細ログ [System Logs]</span>
+    </button>
+
+    <section class="obs-hud-drawer" id="geekDrawer" aria-label="System Diagnostics Console">
+        <div class="hud-top-bar">
+            <div class="hud-top-title">
+                <span class="tag">DIAGNOSTICS</span>
+                <span class="hud-live-pill"><span class="live-dot"></span>LIVE MONITOR</span>
+                <span>SYSTEM_TELEMETRY // RUNTIME_LOGS</span>
+            </div>
+            <div class="hud-top-right">
+                <span class="hud-rate-spec">POLL: <strong>3000ms</strong></span>
+                <button class="hud-close-btn" id="hudCloseBtn">[ESC] CLOSE_CONSOLE</button>
+            </div>
+        </div>
+
+        <div class="hud-stream-screen" id="terminalLog">
+            <div class="log-entry ok">
+                <span class="entry-t">[00:00:00]</span>
+                <span class="entry-body"><span class="log-badge sys">SYS</span><span class="log-text">DEINEI SYSTEM CLUSTER INITIALIZED.</span></span>
+            </div>
+            <div class="log-entry">
+                <span class="entry-t">[00:00:00]</span>
+                <span class="entry-body"><span class="log-badge sys">SYS</span><span class="log-text">LIVE2D CUBISM 4 SDK HARMONICS VERIFIED.</span></span>
+            </div>
+            <div class="log-entry cursor-row" id="terminalCursorRow">
+                <span class="entry-t">[--:--:--]</span>
+                <span class="entry-body"><span class="terminal-cursor">▋</span><span class="cursor-label">TELEMETRY STREAM ACTIVE // LISTENING ON 127.0.0.1...</span></span>
+            </div>
+        </div>
+    </section>
+
+    <!-- ==========================================================================
+         LOGIC (3秒ポーリング / 完了ノードスキップ / 200 OK 厳格判定)
+         ========================================================================== -->
+    <script>
+        const MIN_DISPLAY_MS = 3000;
+        const TARGET_URL = "http://127.0.0.1:8080/";
+        const startTime = Date.now();
+
+        let llmReady = false;
+        let ttsReady = false;
+        let flaskReady = false;
+        let isDeparting = false;
+
+        const friendlyStatusText = document.getElementById("friendlyStatusText");
+        const progressPercent = document.getElementById("progressPercent");
+        const progressBarFill = document.getElementById("progressBarFill");
+        const beaconStatusText = document.getElementById("beaconStatusText");
+        const elapsedTimer = document.getElementById("elapsedTimer");
+        const celestialViewport = document.getElementById("celestialViewport");
+
+        const tileLlm = document.getElementById("tileLlm");
+        const tileTts = document.getElementById("tileTts");
+        const tileFlask = document.getElementById("tileFlask");
+        const tagLlm = document.getElementById("tagLlm");
+        const tagTts = document.getElementById("tagTts");
+        const tagFlask = document.getElementById("tagFlask");
+
+        const geekToggleBtn = document.getElementById("geekToggleBtn");
+        const geekDrawer = document.getElementById("geekDrawer");
+        const hudCloseBtn = document.getElementById("hudCloseBtn");
+        const terminalLog = document.getElementById("terminalLog");
+
+        function formatLogMessage(rawMessage) {
+            const tagMatch = rawMessage.match(/^\[([A-Z0-9_:\-]+)\]\s*(.*)$/);
+            if (tagMatch) {
+                const tag = tagMatch[1];
+                const rest = tagMatch[2];
+                let tagType = 'default';
+                if (tag.startsWith('SYS')) tagType = 'sys';
+                else if (tag.startsWith('INIT')) tagType = 'init';
+                else if (tag.startsWith('LLM')) tagType = 'llm';
+                else if (tag.startsWith('TTS')) tagType = 'tts';
+                else if (tag.startsWith('FLASK')) tagType = 'flask';
+                return `<span class="log-badge ${tagType}">${tag}</span><span class="log-text">${rest}</span>`;
+            }
+            return `<span class="log-text">${rawMessage}</span>`;
+        }
+
+        function appendLog(message, isOk = false, isGold = false) {
+            const now = new Date();
+            const timeStr = `[${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}]`;
+            
+            const row = document.createElement("div");
+            row.className = "log-entry new-entry" + (isOk ? ' ok' : (isGold ? ' gold' : ''));
+            row.innerHTML = `<span class="entry-t">${timeStr}</span><span class="entry-body">${formatLogMessage(message)}</span>`;
+            
+            const cursorRow = document.getElementById("terminalCursorRow");
+            if (cursorRow && cursorRow.parentNode === terminalLog) {
+                terminalLog.insertBefore(row, cursorRow);
+            } else {
+                terminalLog.appendChild(row);
+            }
+            terminalLog.scrollTop = terminalLog.scrollHeight;
+        }
+
+        let isHudOpen = false;
+        function toggleHud(open = !isHudOpen) {
+            isHudOpen = open;
+            geekDrawer.classList.toggle("is-open", isHudOpen);
+            geekToggleBtn.classList.toggle("is-open", isHudOpen);
+            geekToggleBtn.setAttribute("aria-expanded", isHudOpen ? "true" : "false");
+            if (isHudOpen) {
+                geekToggleBtn.innerHTML = '<span>[X]</span><span>コンソールを閉じる</span>';
+            } else {
+                geekToggleBtn.innerHTML = '<span>✦</span><span>システム詳細ログ [System Logs]</span>';
+            }
+        }
+
+        geekToggleBtn.addEventListener("click", () => toggleHud());
+        hudCloseBtn.addEventListener("click", () => toggleHud(false));
+        document.addEventListener("keydown", (e) => {
+            if (e.key === "Escape" && isHudOpen) toggleHud(false);
+        });
+
+        // 経過時間タイマー
+        setInterval(() => {
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+            elapsedTimer.textContent = elapsed + "s";
+        }, 100);
+
+        // 並列更新関数
+        function updateProgress() {
+            let readyCount = (llmReady ? 1 : 0) + (ttsReady ? 1 : 0) + (flaskReady ? 1 : 0);
+            
+            // 1. LLM
+            if (llmReady) {
+                tileLlm.className = "obs-node-tile ready";
+                tagLlm.textContent = "READY // 200";
+            } else {
+                tileLlm.className = "obs-node-tile active";
+            }
+
+            // 2. TTS
+            if (ttsReady) {
+                tileTts.className = "obs-node-tile ready";
+                tagTts.textContent = "READY // 200";
+            } else {
+                tileTts.className = "obs-node-tile active";
+            }
+
+            // 3. Flask
+            if (flaskReady) {
+                tileFlask.className = "obs-node-tile ready";
+                tagFlask.textContent = "READY // 200";
+            } else {
+                tileFlask.className = "obs-node-tile active";
+            }
+
+            // パーセンテージとステータス
+            if (readyCount === 0) {
+                friendlyStatusText.textContent = "各サーバーノードの起動状況を確認中...";
+                progressPercent.textContent = "20%";
+                progressBarFill.style.width = "20%";
+            } else if (readyCount === 1) {
+                if (!llmReady) {
+                    friendlyStatusText.textContent = "LLM推論エンジンを初期化中 (VRAM展開待機)...";
+                } else {
+                    friendlyStatusText.textContent = "TTSおよびFlaskサーバーを準備中...";
+                }
+                progressPercent.textContent = "50%";
+                progressBarFill.style.width = "50%";
+            } else if (readyCount === 2) {
+                if (!llmReady) {
+                    friendlyStatusText.textContent = "LLM推論エンジンの準備完了を待機中...";
+                } else if (!ttsReady) {
+                    friendlyStatusText.textContent = "TTS音声合成サーバーを準備中...";
+                } else {
+                    friendlyStatusText.textContent = "Flaskサーバーの起動を待機中...";
+                }
+                progressPercent.textContent = "80%";
+                progressBarFill.style.width = "80%";
+            } else if (readyCount === 3) {
+                friendlyStatusText.textContent = "全サーバーの準備が完了しました。メイン画面へ移動します...";
+                progressPercent.textContent = "100%";
+                progressBarFill.style.width = "100%";
+                progressBarFill.classList.add("ready");
+                beaconStatusText.textContent = "SYSTEM READY";
+                beaconStatusText.style.color = "#7dd3fc";
+                
+                checkAllReadyAndDepart();
+            }
+        }
+
+        // タイムアウト付きフェッチ (未起動ポートによる直列ブロッキングを完全防止)
+        async function fetchWithTimeout(url, timeoutMs = 1500) {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                const res = await fetch(url, { cache: "no-store", signal: controller.signal });
+                return res;
+            } finally {
+                clearTimeout(timer);
+            }
+        }
+
+        // 真の並列ヘルスチェック (Promise.allSettled により3ノード完全並行実行)
+        let isChecking = false;
+        async function checkClusters() {
+            if (isDeparting || isChecking) return;
+            isChecking = true;
+
+            const checkLlm = async () => {
+                if (llmReady) return;
+                try {
+                    const res = await fetchWithTimeout("http://127.0.0.1:8080/health", 1500);
+                    if (res.status === 200) {
+                        const data = await res.json();
+                        if (data && data.status === "ok") {
+                            llmReady = true;
+                            appendLog("[LLM:8080] LLM ENGINE READY // llama-server 起動完了", true);
+                            updateProgress();
+                        }
+                    } else if (res.status === 503) {
+                        tagLlm.textContent = "LOADING (503)";
+                    }
+                } catch (e) {}
+            };
+
+            const checkTts = async () => {
+                if (ttsReady) return;
+                try {
+                    const res = await fetchWithTimeout("http://127.0.0.1:5001/health", 1500);
+                    if (res.status === 200) {
+                        const data = await res.json();
+                        if (data && data.status === "ok") {
+                            ttsReady = true;
+                            appendLog("[TTS:5001] TTS SYNTHESIS READY // Irodori-TTS 起動完了", true);
+                            updateProgress();
+                        }
+                    }
+                } catch (e) {}
+            };
+
+            const checkFlask = async () => {
+                if (flaskReady) return;
+                try {
+                    const res = await fetchWithTimeout("http://127.0.0.1:5000/health", 1500);
+                    if (res.status === 200) {
+                        const data = await res.json();
+                        if (data && data.status === "ok") {
+                            flaskReady = true;
+                            appendLog("[FLASK:5000] FLASK SERVER READY // Flask Backend 起動完了", true);
+                            updateProgress();
+                        }
+                    }
+                } catch (e) {}
+            };
+
+            try {
+                await Promise.allSettled([checkLlm(), checkTts(), checkFlask()]);
+            } finally {
+                isChecking = false;
+            }
+        }
+
+        function checkAllReadyAndDepart() {
+            if (isDeparting) return;
+
+            const elapsedMs = Date.now() - startTime;
+            const remainingMs = Math.max(0, MIN_DISPLAY_MS - elapsedMs);
+
+            isDeparting = true;
+            appendLog(`[SYS] 全サーバーの準備完了を確認。UIへ安全に接続します (待機: ${(remainingMs / 1000).toFixed(1)}s)`, true, true);
+
+            setTimeout(() => {
+                appendLog("[SYS] REDIRECTING TO HTTP://127.0.0.1:8080/ ...", true);
+                celestialViewport.classList.add("is-leaving");
+
+                setTimeout(() => {
+                    window.location.href = TARGET_URL;
+                }, 500);
+            }, remainingMs);
+        }
+
+        appendLog("[INIT] サーバークラスター監視開始 (確認スパン: 3000ms)...");
+        updateProgress();
+
+        const pollInterval = setInterval(() => {
+            if (isDeparting) {
+                clearInterval(pollInterval);
+                return;
+            }
+            checkClusters();
+        }, 3000);
+
+    </script>
+</body>
+</html>
