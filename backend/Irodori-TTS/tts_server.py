@@ -66,7 +66,19 @@ async def security_middleware(request: Request, call_next):
             if sec_fetch_site and sec_fetch_site not in ("same-origin", "none"):
                 return JSONResponse(status_code=403, content={"error": "Cross-site request forbidden"})
 
+    if request.method == "OPTIONS" and request.url.path in ("/", "/health"):
+        return Response(status_code=204, headers={
+            "Access-Control-Allow-Origin": request.headers.get("origin", "*"),
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With"
+        })
+
     response = await call_next(request)
+    # ヘルスチェック (安全な読み取り) の場合はローカルスプラッシュ画面 (file:/// 等) からの取得を常に許可
+    if request.url.path in ("/", "/health") and request.method in ("GET", "HEAD"):
+        origin = request.headers.get("origin")
+        response.headers["Access-Control-Allow-Origin"] = origin if origin else "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
     return response
 
 app.add_middleware(

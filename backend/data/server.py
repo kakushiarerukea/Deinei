@@ -83,8 +83,12 @@ ALLOWED_HOSTS = {
 
 try:
     from flask_cors import CORS
-    CORS(app, resources={r"/*": {"origins": list(ALLOWED_ORIGINS)}}, expose_headers=["X-Deining-Recalled-Memories", "Content-Type"])
-    print(f"✅ CORS 有効化済み (許可オリジン: {', '.join(sorted(ALLOWED_ORIGINS))})")
+    CORS(app, resources={
+        r"/health": {"origins": "*"},
+        r"/": {"origins": "*"},
+        r"/*": {"origins": list(ALLOWED_ORIGINS)}
+    }, expose_headers=["X-Deining-Recalled-Memories", "Content-Type"])
+    print(f"✅ CORS 有効化済み (許可オリジン: {', '.join(sorted(ALLOWED_ORIGINS))}, /health は全開放)")
 except ImportError:
     pass
 
@@ -132,6 +136,13 @@ def security_shield():
 @app.after_request
 def add_cors_headers(response):
     req_origin = request.headers.get('Origin')
+    # ヘルスチェック (安全な読み取り) の場合はローカルスプラッシュ画面 (file:/// 等) からの確認を許可
+    if request.path in ('/', '/health') and request.method in ('GET', 'HEAD', 'OPTIONS'):
+        response.headers['Access-Control-Allow-Origin'] = req_origin if req_origin else '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+        return response
+
     if req_origin and req_origin.rstrip('/') in ALLOWED_ORIGINS:
         response.headers['Access-Control-Allow-Origin'] = req_origin
         response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
@@ -360,7 +371,12 @@ def _search_ephemeral_web_for_proxy(query_text, n_results=2):
 @app.route('/')
 @app.route('/health')
 def health_check():
-    return jsonify({'status': 'ok', 'service': 'deining-proxy'})
+    res = jsonify({'status': 'ok', 'service': 'deining-proxy'})
+    req_origin = request.headers.get('Origin')
+    res.headers['Access-Control-Allow-Origin'] = req_origin if req_origin else '*'
+    res.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+    res.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+    return res
 
 CHATS_DIR = os.path.join(BASE_DIR, 'chats')
 if not os.path.exists(CHATS_DIR):

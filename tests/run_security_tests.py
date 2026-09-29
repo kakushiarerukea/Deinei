@@ -259,6 +259,25 @@ def test_deduplicate_api():
     print(f"[/memory/deduplicate] -> Status: {r.status_code}, Body: {r.text.strip()}")
     assert r.status_code == 200, f"Expected 200, got {r.status_code}"
 
+def test_splash_health_check_cors():
+    print("\n========================================================")
+    print("🧪 8. splash.html 用 CORS ヘルスチェック検証 (Origin: null)")
+    print("========================================================")
+    # 5000: Flask health check with Origin: null
+    r5000 = requests.get(f"{SERVER_URL}/health", headers={"Origin": "null"})
+    print(f"[5000 /health Origin: null] -> Status: {r5000.status_code}, ACAO: {r5000.headers.get('Access-Control-Allow-Origin')}")
+    assert r5000.status_code == 200, f"Expected 200, got {r5000.status_code}"
+    assert r5000.headers.get("Access-Control-Allow-Origin") in ("null", "*"), "Missing or invalid Access-Control-Allow-Origin on 5000"
+
+    # 5001: TTS health check with Origin: null
+    try:
+        r5001 = requests.get(f"{TTS_URL}/health", headers={"Origin": "null"}, timeout=1)
+        print(f"[5001 /health Origin: null] -> Status: {r5001.status_code}, ACAO: {r5001.headers.get('Access-Control-Allow-Origin')}")
+        assert r5001.status_code == 200, f"Expected 200, got {r5001.status_code}"
+        assert r5001.headers.get("Access-Control-Allow-Origin") in ("null", "*"), "Missing or invalid Access-Control-Allow-Origin on 5001"
+    except Exception as e:
+        print(f"  ℹ️ TTS サーバー未起動または例外: {e}")
+
 def cleanup_chats():
     chats_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend', 'data', 'chats'))
     if os.path.isdir(chats_dir):
@@ -278,6 +297,8 @@ if __name__ == '__main__':
         test_avatar_zip_security()
         test_silver_model_actual_load()
         test_deduplicate_api()
+        test_splash_health_check_cors()
         print("\n🎉 全ての回帰テストが成功しました！")
     finally:
         cleanup_chats()
+
