@@ -61,7 +61,7 @@ if ($vramGB -ge 22.0) {
     # 24GB VRAM (RTX 3090, 4090 etc.)
     $profileName = "24GB (Ultra)"
     $ncmoe = 0
-    $mmprojArgs = "--mmproj mmproj-BF16.gguf"
+    $mmprojArgs = "--mmproj Melody1437-27B.mmproj-f16.gguf"
     $ttsModelUrl = "https://huggingface.co/Aratako/Irodori-TTS-v4-Small/resolve/main/model.safetensors"
     $ttsModelDesc = "BF16 (~3.0GB)"
 } elseif ($vramGB -ge 13.0) {
@@ -756,7 +756,7 @@ $llmModelName = "Melody1437-27B.i1-IQ4_XS.gguf"
 $llmModelPath = Join-Path $llamaDir $llmModelName
 $llmModelUrl = "https://huggingface.co/mradermacher/Melody1437-27B-i1-GGUF/resolve/main/Melody1437-27B.i1-IQ4_XS.gguf?download=true"
 
-$mmprojModelName = "mmproj-BF16.gguf"
+$mmprojModelName = "Melody1437-27B.mmproj-f16.gguf"
 $mmprojModelPath = Join-Path $llamaDir $mmprojModelName
 $mmprojModelUrl = "https://huggingface.co/mradermacher/Melody1437-27B-GGUF/resolve/main/Melody1437-27B.mmproj-f16.gguf?download=true"
 

@@ -2,6 +2,14 @@
 
 **LLM推論 × 長期記憶RAG × Live2D連動UI × リアルタイムTTS音声合成** を統合した、完全ローカルAI対話ソフトウェアです。
 
+> [!NOTE]
+> **【外部通信に関する透明性と仕様】**
+> 本ソフトウェアは、LLM推論・長期記憶ベクトルDB（ChromaDB）・Live2D描画・TTS音声合成のすべてがPCローカル内で完結するローカルAI設計です。
+> 外部インターネットへの接続が発生するのは以下の2点に限定され、無断での通信は行いません（詳細な通信先ドメイン・ポート・制御方法は [docs/external-connections.md](docs/external-connections.md) に全件記載しています）：
+> 1. **初回セットアップ時**: GGUFモデルファイルやPython依存パッケージの初回ダウンロード時（手動配置による完全オフライン化も可能）。
+> 2. **Web検索トグルON時**: ユーザーが明示的にWeb検索トグルをONにし、「〜を検索して」「〜の天気を教えて」等の明示的な指示を入力した時のみ、検索単語または地名情報が外部API（DuckDuckGo / Open-Meteo / Nominatim）へ送信されます。
+> ※Web検索トグルOFF時は、天気API・地名逆引きを含むすべての外部通信が遮断され、完全ローカルで動作します。
+
 有限なコンテキストウィンドウ（16,384トークン）内で、**「無限に近い長期対話」「KVキャッシュヒット率の向上」「Live2Dの感情表現・口パク同期」** の実現を、8~24GBのVRAMで完全ローカルで達成することが、本リポジトリの目標です。
 
 ---
@@ -62,9 +70,17 @@
   - **Open-Meteo ＆ Nominatim によるリアルタイム気象連携**:
     - 完全無料・APIキー不要の気象パイプラインを統合。発言内の地名からNominatim（OpenStreetMap）で緯度・経度を逆引きし、Open-Meteo APIから「今日・明日・明後日」のWMO気象コード（快晴・雨・雪等）、最高/最低気温、降水確率を取得。
     - 取得した気象データはプロンプトへ注入され、システムプロンプトの情景描写ルール（`* *`）と連動。「外、雨が強くなってきたね」「明日は冷え込むみたい」といった現実に即したロールプレイを成立。
-  - **ワンクリックトグル ＆ KVキャッシュ完全保護**:
+  - **ワンクリックトグル ＆ KVキャッシュ保護**:
     - チャット入力欄直下の専用トグル（`ChatFormActionSearchToggle`）により、ワンクリックで瞬時に機能の有効/無効を切り替え可能。
-    - 検索結果はコンテキスト末尾（ユーザー発言直前）へ局所注入されるため、OFF時は外部通信が一切発生せず、過去ログのKVキャッシュ（Prefix Caching）を100%保全して最速の推論速度を維持。
+    - 検索結果はコンテキスト末尾（ユーザー発言直前）へ局所注入されるため、OFF時は外部通信が一切発生せず、過去ログのKVキャッシュ（Prefix Caching）を最大限維持して高速な推論速度を保ちます（※文脈更新時を除く）。
+
+### ⚡ KVキャッシュ（Prefix Caching）の動作と再計算が発生する例外
+本システムでは、通常の1対1の継続的な会話においてKVキャッシュ（Prefix Caching）を最大限再利用し、プロンプト処理（Prompt Processing）を最小化します。ただし、文脈構造が意図的に再構成される以下のケースでは、設計上KVキャッシュの再評価・再計算が発生します（詳細は [泥濘システム総合完全ガイドforAI.md](assetsForAntigravity/泥濘システム総合完全ガイドforAI.md) §7 参照）：
+1. **自動要約発火時**: 30メッセージが新しい要約ブロックへ圧縮・置換されるため、Prefix構造が更新されます（次ターン以降は再びキャッシュヒット）。
+2. **Web検索発火時**: 検索ワード決定用のStage 1推論、および外部情報のコンテキスト注入により一時的な差分が発生します（速度優先時は検索トグルOFFを推奨）。
+3. **世界線（ブランチ）の切り替え・過去発言の編集・再生成時**: 会話ツリーの別ブランチや過去時点へロールバックした場合、その時点の文脈へキャッシュが切り替わります。
+4. **記憶の完全再構築（Rebuild Memory）時**: 会話全体のあらすじ・記憶を一括再生成した場合。
+
   > [!WARNING]
   > **【プライバシーとネットワーク通信に関する最重要警告】**
   > 本ソフトウェアは、LLM推論・長期記憶ベクトルDB（ChromaDB）・Live2D描画・TTS音声合成のすべてがPCローカル内で完結する**完全オフライン設計**を原則としています。
@@ -119,7 +135,7 @@
    - 起動用ランチャー（`start_ai_servers.bat`）の生成
 3. 処理の終盤で、画面に **「モデル一式 (約16GB) を今すぐ自動ダウンロードしますか？ (y/n)」** と表示されます。
    - キーボードの **`y`** を押して Enter を入力してください。
-   - 推奨対話モデル本体（`Melody1437-27B.i1-IQ4_XS.gguf` 約15.2GB）およびマルチモーダル画像認識用エンコーダ（`mmproj-BF16.gguf` 約885MB）が自動ダウンロードされます（※後から手動で配置したい場合は `n` でスキップ可能です）。
+   - 推奨対話モデル本体（`Melody1437-27B.i1-IQ4_XS.gguf` 約15.2GB）およびマルチモーダル画像認識用エンコーダ（`Melody1437-27B.mmproj-f16.gguf` 約885MB）が自動ダウンロードされます（※後から手動で配置したい場合は `n` でスキップ可能です）。
 4. 画面に **`[SUCCESS] Setup Completed!`** と表示されたら導入完了です。Enterキー等を押して画面を閉じてください。デスクトップに **「泥濘 (Deinei) を起動」** のショートカットが自動作成されます。
 
 ---
@@ -145,7 +161,7 @@
 #### ① LLM メインモデル (.gguf)
 - **推奨モデル**: **[`Melody1437-27B.i1-IQ4_XS.gguf`](https://huggingface.co/mradermacher/Melody1437-27B-i1-GGUF/resolve/main/Melody1437-27B.i1-IQ4_XS.gguf?download=true)**（約15.2GB / ReadyArt氏によるRP特化ファインチューン）
 - **配置先**: `llama-b9873-bin-win-cuda-13.3-x64sandbox/` フォルダ直下
-- **Visionエンコーダ (画像認識用)**: **[`Melody1437-27B.mmproj-f16.gguf`](https://huggingface.co/mradermacher/Melody1437-27B-GGUF/resolve/main/Melody1437-27B.mmproj-f16.gguf?download=true)**（ファイル名を `mmproj-BF16.gguf` に変更して同フォルダに配置）
+- **Visionエンコーダ (画像認識用)**: **[`Melody1437-27B.mmproj-f16.gguf`](https://huggingface.co/mradermacher/Melody1437-27B-GGUF/resolve/main/Melody1437-27B.mmproj-f16.gguf?download=true)**（同フォルダにそのまま配置。リネーム不要）
 
 #### ② Live2D キャラクターモデル
 - **対応モデル**: Usaneko式 無料Live2Dモデル（「銀髪の女の子」/「茶髪の癒し系お姉さん」）
@@ -172,7 +188,7 @@
 - **Web Search API**: duckduckgo_search (MIT License)
 - **Vector Database**: ChromaDB (Apache 2.0)
 - **Text Embedding**: cl-nagoya ruri-v3-310m (Apache 2.0)
-- **Base LLM**: Google DeepMind gemma-4-26B-A4B (Apache 2.0) / ReadyArt Melody1437-26B-A4B-GGUF (Apache 2.0)
+- **Base LLM**: Google DeepMind gemma-4-26B-A4B (Apache 2.0) / ReadyArt Melody1437-27B-i1-GGUF (Apache 2.0)
 - **Live2D Technology**: Live2D Cubism SDK (非収益型コンテンツ向けプラン)
 - **Weather Forecast Data**: [Open-Meteo API](https://open-meteo.com/) (CC BY 4.0)
 - **Geocoding & Map Data**: [Nominatim](https://nominatim.org/) / © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) (ODbL)

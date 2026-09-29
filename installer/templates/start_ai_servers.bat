@@ -83,10 +83,10 @@ for /f "usebackq delims=" %%F in (`powershell -NoProfile -Command "Get-ChildItem
 
 if not "%FOUND_MODEL%"=="" (
     echo  - 検出されたモデル: %FOUND_MODEL%
-    start "LLM Server (8080)" /d "%~dp0llama-b9873-bin-win-cuda-13.3-x64sandbox" cmd /k ".\llama-server.exe -m ""%FOUND_MODEL%"" %MMPROJ_ARGS% --no-mmap -fit off -c %CACHE_RAM% -ngl 99 -ncmoe %NCMOE% --flash-attn on --cache-reuse 256 -np 1 --parallel 1 --path ./custom_public --port 8080 --chat-template-file gemma_chat_template.jinja"
+    start "LLM Server (8080)" /d "%~dp0llama-b9873-bin-win-cuda-13.3-x64sandbox" cmd /k ".\llama-server.exe -m ""%FOUND_MODEL%"" %MMPROJ_ARGS% --host 127.0.0.1 --no-slots --no-mmap -fit off -c %CACHE_RAM% -ngl 99 -ncmoe %NCMOE% --flash-attn on --cache-reuse 256 -np 1 --parallel 1 --path ./custom_public --port 8080 --chat-template-file gemma_chat_template.jinja"
 ) else (
     echo  - モデル自動検出なし: Melody1437 をデフォルト起動します
-    start "LLM Server (8080)" /d "%~dp0llama-b9873-bin-win-cuda-13.3-x64sandbox" cmd /k ".\llama-server.exe -m Melody1437-26B-A4B.i1-IQ4_XS.gguf %MMPROJ_ARGS% --no-mmap -fit off -c %CACHE_RAM% -ngl 99 -ncmoe %NCMOE% --flash-attn on --cache-reuse 256 -np 1 --parallel 1 --path ./custom_public --port 8080 --chat-template-file gemma_chat_template.jinja"
+    start "LLM Server (8080)" /d "%~dp0llama-b9873-bin-win-cuda-13.3-x64sandbox" cmd /k ".\llama-server.exe -m Melody1437-27B.i1-IQ4_XS.gguf %MMPROJ_ARGS% --host 127.0.0.1 --no-slots --no-mmap -fit off -c %CACHE_RAM% -ngl 99 -ncmoe %NCMOE% --flash-attn on --cache-reuse 256 -np 1 --parallel 1 --path ./custom_public --port 8080 --chat-template-file gemma_chat_template.jinja"
 )
 
 :: 使用する Python 実行環境の自動特定 (パッケージ健全性チェック付き)
