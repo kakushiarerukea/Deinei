@@ -1,12 +1,85 @@
-import os, sys, io, json, zipfile, tempfile, shutil
+"""
+泥濘 (Deinei) セキュリティ & 回帰統合テストスイート
+--------------------------------------------------------------------------------
+本テストは、本番環境のデータ（chats/, chroma_db/, custom_public/deining/）を
+誤って汚染・破壊しないよう、完全隔離された別ポート（既定: 5100）および
+一時ディレクトリ上で動作するサーバーを対象として実行されます。
+
+【実行手順 (ユーザーが実機でテストする際の手順)】
+1. 隔離テスト環境用のサーバーを別ポート (5100) で起動:
+   (PowerShell)
+   $env:DEINEI_PORT = "5100"
+   $env:DEINEI_DATA_DIR = "$env:TEMP\deinei_test_sandbox\data"
+   $env:DEINEI_CUSTOM_PUBLIC_DIR = "$env:TEMP\deinei_test_sandbox\custom_public"
+   $env:DEINEI_STATIC_DIR = "$env:TEMP\deinei_test_sandbox\static"
+   python backend/data/server.py
+
+2. 別のターミナルで本テストを実行:
+   $env:TEST_SERVER_PORT = "5100"
+   $env:TEST_TEMP_ROOT = "$env:TEMP\deinei_test_sandbox"
+   python tests/run_security_tests.py
+--------------------------------------------------------------------------------
+"""
+
+import os, sys, io, json, zipfile, tempfile, shutil, hashlib
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 import requests
 
-SERVER_URL = "http://127.0.0.1:5000"
-TTS_URL = "http://127.0.0.1:5001"
+# ====== テスト設定 & 隔離ポート設定 ======
+TEST_SERVER_PORT = int(os.environ.get('TEST_SERVER_PORT', 5100))
+SERVER_URL = f"http://127.0.0.1:{TEST_SERVER_PORT}"
+TTS_URL = os.environ.get('TEST_TTS_URL', "http://127.0.0.1:5001")
+
+# ====== パス解決 & 本番ガード ======
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+PROD_DATA_DIR = os.path.abspath(os.path.join(REPO_ROOT, 'backend', 'data'))
+PROD_CHATS_DIR = os.path.abspath(os.path.join(PROD_DATA_DIR, 'chats'))
+PROD_CHROMA_DIR = os.path.abspath(os.path.join(PROD_DATA_DIR, 'chroma_db'))
+PROD_CUSTOM_PUBLIC_DIR = os.path.abspath(os.path.join(REPO_ROOT, 'llama-b9873-bin-win-cuda-13.3-x64sandbox', 'custom_public'))
+PROD_CUSTOM_PUBLIC_LEGACY = os.path.abspath(os.path.join(REPO_ROOT, 'backend', 'llama.cpp-b9873', 'custom_public'))
+
+TEST_TEMP_ROOT = os.environ.get('TEST_TEMP_ROOT')
+if not TEST_TEMP_ROOT:
+    TEST_TEMP_ROOT = os.path.join(tempfile.gettempdir(), 'deinei_test_sandbox')
+TEST_TEMP_ROOT = os.path.abspath(TEST_TEMP_ROOT)
+
+TEST_DATA_DIR = os.path.join(TEST_TEMP_ROOT, 'data')
+TEST_CHATS_DIR = os.path.join(TEST_DATA_DIR, 'chats')
+TEST_CUSTOM_PUBLIC_DIR = os.path.join(TEST_TEMP_ROOT, 'custom_public')
+TEST_STATIC_DIR = os.path.join(TEST_TEMP_ROOT, 'static')
+
+def verify_isolated_path(target_path: str):
+    """対象パスが本番データ領域に解決される場合は即座に例外を送出して実行拒絶"""
+    abs_target = os.path.abspath(target_path)
+    protected_paths = [
+        PROD_DATA_DIR,
+        PROD_CHATS_DIR,
+        PROD_CHROMA_DIR,
+        PROD_CUSTOM_PUBLIC_DIR,
+        PROD_CUSTOM_PUBLIC_LEGACY
+    ]
+    for p in protected_paths:
+        if abs_target == p or abs_target.startswith(p + os.sep):
+            raise RuntimeError(f"❌ [Safety Guard] テスト対象ディレクトリ '{abs_target}' が本番領域 '{p}' に解決されました！本番データ保護のため直ちに停止します。")
+
+def compute_dir_fingerprint(dir_path: str) -> dict[str, str]:
+    """ディレクトリ内の全ファイル（相対パス -> SHA-256）をハッシュ化"""
+    if not os.path.exists(dir_path):
+        return {}
+    fingerprints = {}
+    for root, _, files in os.walk(dir_path):
+        for f in sorted(files):
+            full_path = os.path.join(root, f)
+            rel_path = os.path.relpath(full_path, dir_path)
+            try:
+                with open(full_path, 'rb') as fp:
+                    fingerprints[rel_path] = hashlib.sha256(fp.read()).hexdigest()
+            except Exception:
+                pass
+    return fingerprints
 
 def test_session_id_traversal():
     print("\n========================================================")
@@ -22,6 +95,9 @@ def test_session_id_traversal():
         ("DELETE", "/api/sessions/..\\..\\evil", None),
         ("POST", "/api/sessions", {"id": "../../evil", "name": "test"}),
         ("POST", "/api/sessions", {"id": "..\\..\\evil", "name": "test"}),
+        ("DELETE", "/api/sessions/NUL", None),
+        ("GET", "/api/sessions/CON", None),
+        ("POST", "/api/sessions/PRN", {"name": "test"}),
     ]
 
     headers = {"Origin": "http://localhost:8080"}
@@ -38,7 +114,7 @@ def test_session_id_traversal():
 
 def test_origin_null_and_csrf():
     print("\n========================================================")
-    print("🧪 2. Origin: null および CSRF 遮断テスト (5000: Data Server)")
+    print("🧪 2. Origin: null および CSRF 遮断テスト (Data Server)")
     print("========================================================")
     
     # Origin: null (sandbox iframe や data: URI)
@@ -62,7 +138,6 @@ def test_tts_server_security():
     print("========================================================")
     
     try:
-        # 正常系チェック (起動していればテスト)
         r_health = requests.get(f"{TTS_URL}/health", timeout=1)
         if r_health.status_code != 200:
             print("  ℹ️ TTS サーバー未起動のためスキップ")
@@ -126,7 +201,8 @@ def test_avatar_zip_security():
         print(f"[A: 悪意スクリプト混入ZIP] -> Status: {r.status_code}, Body: {r.text.strip()}")
         assert r.status_code == 200, f"Expected 200, got {r.status_code}"
         
-        custom_public_dest = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend', 'llama.cpp-b9873', 'custom_public', 'deining', 'ulvm2_0001'))
+        # 隔離ディレクトリ側の展開結果を確認
+        custom_public_dest = os.path.join(TEST_CUSTOM_PUBLIC_DIR, 'deining', 'ulvm2_0001')
         html_exists = os.path.exists(os.path.join(custom_public_dest, 'malicious.html'))
         js_exists = os.path.exists(os.path.join(custom_public_dest, 'evil.js'))
         py_exists = os.path.exists(os.path.join(custom_public_dest, 'exploit.py'))
@@ -202,7 +278,7 @@ def test_silver_model_actual_load():
     print("🧪 6. 実データ「5衣装の銀髪モデル」のZIP化・読み込み検証")
     print("========================================================")
     
-    silver_src = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend', 'data', 'ulvm2_0001'))
+    silver_src = os.path.abspath(os.path.join(REPO_ROOT, 'backend', 'data', 'ulvm2_0001'))
     assert os.path.isdir(silver_src), f"Silver model dir not found: {silver_src}"
 
     with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as tf:
@@ -228,7 +304,7 @@ def test_silver_model_actual_load():
         print(f"[実データアップロード結果] -> Status: {r.status_code}, Body: {r.text.strip()}")
         assert r.status_code == 200, f"Expected 200, got {r.status_code}"
         
-        dest_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend', 'llama.cpp-b9873', 'custom_public', 'deining', 'ulvm2_0001'))
+        dest_dir = os.path.join(TEST_CUSTOM_PUBLIC_DIR, 'deining', 'ulvm2_0001')
         key_files = [
             'ulvm2_0001.model3.json',
             'ulvm2_0001.moc3',
@@ -245,7 +321,7 @@ def test_silver_model_actual_load():
         all_ok = all(os.path.exists(os.path.join(dest_dir, kf)) for kf in key_files)
         if all_ok:
             print("  ✅ 全アセット（5衣装・テクスチャ・JPGアイコン・VTube設定等）が欠落なく完全配置されました！")
-        assert all_ok, "Some critical avatar assets are missing!"
+        assert all_ok, "Some critical avatar assets are missing in isolated destination!"
     finally:
         if os.path.exists(actual_zip_path):
             os.remove(actual_zip_path)
@@ -263,13 +339,11 @@ def test_splash_health_check_cors():
     print("\n========================================================")
     print("🧪 8. splash.html 用 CORS ヘルスチェック検証 (Origin: null)")
     print("========================================================")
-    # 5000: Flask health check with Origin: null
-    r5000 = requests.get(f"{SERVER_URL}/health", headers={"Origin": "null"})
-    print(f"[5000 /health Origin: null] -> Status: {r5000.status_code}, ACAO: {r5000.headers.get('Access-Control-Allow-Origin')}")
-    assert r5000.status_code == 200, f"Expected 200, got {r5000.status_code}"
-    assert r5000.headers.get("Access-Control-Allow-Origin") in ("null", "*"), "Missing or invalid Access-Control-Allow-Origin on 5000"
+    r_health = requests.get(f"{SERVER_URL}/health", headers={"Origin": "null"})
+    print(f"[{TEST_SERVER_PORT} /health Origin: null] -> Status: {r_health.status_code}, ACAO: {r_health.headers.get('Access-Control-Allow-Origin')}")
+    assert r_health.status_code == 200, f"Expected 200, got {r_health.status_code}"
+    assert r_health.headers.get("Access-Control-Allow-Origin") in ("null", "*"), f"Missing or invalid Access-Control-Allow-Origin on {TEST_SERVER_PORT}"
 
-    # 5001: TTS health check with Origin: null
     try:
         r5001 = requests.get(f"{TTS_URL}/health", headers={"Origin": "null"}, timeout=1)
         print(f"[5001 /health Origin: null] -> Status: {r5001.status_code}, ACAO: {r5001.headers.get('Access-Control-Allow-Origin')}")
@@ -278,17 +352,37 @@ def test_splash_health_check_cors():
     except Exception as e:
         print(f"  ℹ️ TTS サーバー未起動または例外: {e}")
 
-def cleanup_chats():
-    chats_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend', 'data', 'chats'))
-    if os.path.isdir(chats_dir):
-        for f in os.listdir(chats_dir):
+def cleanup_isolated_sandbox():
+    """テスト用一時サンドボックスのみを安全にクリーンアップ（本番ディレクトリは一切触らない）"""
+    verify_isolated_path(TEST_TEMP_ROOT)
+    if os.path.isdir(TEST_CHATS_DIR):
+        for f in os.listdir(TEST_CHATS_DIR):
             if f.endswith('.json'):
                 try:
-                    os.remove(os.path.join(chats_dir, f))
+                    os.remove(os.path.join(TEST_CHATS_DIR, f))
                 except Exception:
                     pass
 
 if __name__ == '__main__':
+    # 1. 安全性ガード: 本番パスがテストターゲットに設定されていないか検証
+    verify_isolated_path(TEST_TEMP_ROOT)
+    verify_isolated_path(TEST_DATA_DIR)
+    verify_isolated_path(TEST_CUSTOM_PUBLIC_DIR)
+    
+    if TEST_SERVER_PORT == 5000 and os.environ.get('ALLOW_PROD_PORT') != '1':
+        sys.exit("❌ [Safety Guard] 本番ポート5000に対する直接テストは禁止されています。環境変数 TEST_SERVER_PORT に隔離ポート (例: 5100) を設定してください。")
+
+    print(f"🛡️ [Safety Guard] 隔離テスト環境を検証中...")
+    print(f"   - テスト対象サーバーURL: {SERVER_URL}")
+    print(f"   - テストサンドボックス: {TEST_TEMP_ROOT}")
+    
+    # 2. 本番ディレクトリの実行前フィンガープリント取得
+    initial_hashes = {
+        'chats': compute_dir_fingerprint(PROD_CHATS_DIR),
+        'chroma': compute_dir_fingerprint(PROD_CHROMA_DIR),
+        'custom_public': compute_dir_fingerprint(PROD_CUSTOM_PUBLIC_DIR)
+    }
+
     try:
         test_session_id_traversal()
         test_origin_null_and_csrf()
@@ -298,7 +392,18 @@ if __name__ == '__main__':
         test_silver_model_actual_load()
         test_deduplicate_api()
         test_splash_health_check_cors()
-        print("\n🎉 全ての回帰テストが成功しました！")
+        print("\n🎉 全てのセキュリティ回帰テストが成功しました！")
     finally:
-        cleanup_chats()
+        # 3. テスト一時領域のクリーンアップ
+        cleanup_isolated_sandbox()
 
+        # 4. 本番ディレクトリのハッシュ不変検証
+        final_hashes = {
+            'chats': compute_dir_fingerprint(PROD_CHATS_DIR),
+            'chroma': compute_dir_fingerprint(PROD_CHROMA_DIR),
+            'custom_public': compute_dir_fingerprint(PROD_CUSTOM_PUBLIC_DIR)
+        }
+        for name in initial_hashes:
+            if initial_hashes[name] != final_hashes[name]:
+                raise AssertionError(f"❌ [CRITICAL SAFETY ALERT] 本番ディレクトリ '{name}' のハッシュが変更されました！")
+        print("🛡️ [Safety Guard] 本番ディレクトリ（chats, chroma_db, custom_public）のハッシュ不変（完全保護）を確認しました！")

@@ -164,9 +164,10 @@ def add_cors_headers(response):
     return response
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-HISTORY_FILE = os.path.join(BASE_DIR, 'history.json')
-AI_HISTORY_FILE = os.path.join(BASE_DIR, 'ai_history.json')
-CHROMA_DB_DIR = os.path.join(BASE_DIR, 'chroma_db')
+DATA_DIR = os.path.abspath(os.environ.get('DEINEI_DATA_DIR', '').strip() or BASE_DIR)
+HISTORY_FILE = os.path.join(DATA_DIR, 'history.json')
+AI_HISTORY_FILE = os.path.join(DATA_DIR, 'ai_history.json')
+CHROMA_DB_DIR = os.path.abspath(os.environ.get('DEINEI_CHROMA_DIR', '').strip() or os.path.join(DATA_DIR, 'chroma_db'))
 
 # ====== ChromaDB（長期記憶 / RAG）の初期化 ======
 import chromadb
@@ -391,9 +392,9 @@ def health_check():
     res.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
     return res
 
-CHATS_DIR = os.path.join(BASE_DIR, 'chats')
+CHATS_DIR = os.path.abspath(os.environ.get('DEINEI_CHATS_DIR', '').strip() or os.path.join(DATA_DIR, 'chats'))
 if not os.path.exists(CHATS_DIR):
-    os.makedirs(CHATS_DIR)
+    os.makedirs(CHATS_DIR, exist_ok=True)
 
 from session_validator import is_safe_session_id
 
@@ -2325,9 +2326,21 @@ def extract_live2d_zip(zip_source, custom_public_dir, static_dir=None):
             'exists': True
         }
 
+def get_custom_public_dir() -> str:
+    env_dir = os.environ.get('DEINEI_CUSTOM_PUBLIC_DIR', '').strip()
+    if env_dir:
+        return os.path.abspath(env_dir)
+    return os.path.abspath(os.path.join(BASE_DIR, '..', '..', 'llama-b9873-bin-win-cuda-13.3-x64sandbox', 'custom_public'))
+
+def get_static_dir() -> str:
+    env_dir = os.environ.get('DEINEI_STATIC_DIR', '').strip()
+    if env_dir:
+        return os.path.abspath(env_dir)
+    return os.path.abspath(os.path.join(BASE_DIR, '..', 'llama.cpp-b9873', 'tools', 'ui', 'static', 'deining'))
+
 def get_all_avatar_models_data():
     import glob
-    custom_public_dir = os.path.abspath(os.path.join(BASE_DIR, '..', '..', 'llama-b9873-bin-win-cuda-13.3-x64sandbox', 'custom_public'))
+    custom_public_dir = get_custom_public_dir()
     
     def find_model3_json(folder_name, default_fallback):
         # 1. 統一パス: custom_public/deining/<folder>/ 配下を検索
@@ -2383,8 +2396,8 @@ def get_avatar_models():
 @app.route('/api/avatar/upload', methods=['POST'])
 def upload_avatar_model():
     """Live2DモデルのZIPファイルを受け取り、自動解凍・配置するAPI（マルチパートファイルのみ受付）"""
-    custom_public_dir = os.path.abspath(os.path.join(BASE_DIR, '..', '..', 'llama-b9873-bin-win-cuda-13.3-x64sandbox', 'custom_public'))
-    static_dir = os.path.abspath(os.path.join(BASE_DIR, '..', 'llama.cpp-b9873', 'tools', 'ui', 'static', 'deining'))
+    custom_public_dir = get_custom_public_dir()
+    static_dir = get_static_dir()
 
     if 'file' in request.files:
         file_obj = request.files['file']
