@@ -14,7 +14,7 @@ if hasattr(sys.stderr, 'reconfigure'):
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
 from flask import Flask, request, jsonify, send_from_directory, Response, stream_with_context
-import json, uuid, threading, re, logging, time, hashlib, base64
+import json, uuid, threading, re, logging, time, hashlib, base64, hmac
 from datetime import datetime
 import requests as http_requests
 
@@ -50,19 +50,23 @@ _search_logger.addHandler(_fh)
 app = Flask(__name__)
 
 # ====== ネットワーク・セキュリティ設定の一元管理 ======
-# 環境変数 DEINEI_PORT, LLAMA_PORT, ALLOWED_ORIGINS, DEINEI_API_KEY から動的に設定可能
+# 環境変数 DEINEI_PORT, LLAMA_PORT, ALLOWED_ORIGINS, DEINEI_API_KEY, DEINEI_HOST から動的に設定可能
 SERVER_PORT = int(os.environ.get('DEINEI_PORT', 5000))
 LLAMA_PORT = int(os.environ.get('LLAMA_PORT', 8080))
 LLAMA_SERVER_URL = os.environ.get('LLAMA_SERVER_URL', f'http://localhost:{LLAMA_PORT}')
 DEINEI_API_KEY = os.environ.get('DEINEI_API_KEY', '').strip()
+BIND_HOST = os.environ.get('DEINEI_HOST', '127.0.0.1').strip()
 
-# ALLOWED_ORIGINS の厳格バリデーション (* や null, 空白は絶対排除)
+# 非ループバックアドレス(0.0.0.0等)へのバインド時は APIキー設定を強制
+if BIND_HOST not in ('127.0.0.1', 'localhost', '::1') and not DEINEI_API_KEY:
+    sys.exit("❌ [Security Error] 非ループバックアドレス(0.0.0.0やLAN IP等)にバインドする場合は DEINEI_API_KEY の設定が必須です。")
+
+# ALLOWED_ORIGINS の厳格バリデーション (* や null, 空白, 非HTTP/HTTPS は起動時エラー)
 _raw_origins = [o.strip() for o in os.environ.get('ALLOWED_ORIGINS', '').split(',') if o.strip()]
 _safe_extra_origins = []
 for o in _raw_origins:
     if o in ('*', 'null', 'none') or o.startswith('*') or not o.startswith(('http://', 'https://')):
-        print(f"⚠️ [Security Warning] 不正・危険なオリジン '{o}' は ALLOWED_ORIGINS から除外されました。")
-        continue
+        sys.exit(f"❌ [Security Error] ALLOWED_ORIGINS に不正または危険なオリジン '{o}' が含まれています。ワイルドカード (*)、null、非HTTP/HTTPS は禁止です。")
     _safe_extra_origins.append(o)
 
 ALLOWED_ORIGINS = {
@@ -94,12 +98,12 @@ except ImportError:
 
 @app.before_request
 def security_shield():
-    # 0. APIキー認証 (DEINEI_API_KEY が設定されている場合は必須検証)
+    # 0. APIキー認証 (DEINEI_API_KEY が設定されている場合は必須検証。OPTIONSプリフライトは除外)
     if DEINEI_API_KEY and request.method != 'OPTIONS':
         auth_header = request.headers.get('Authorization', '')
         api_key_header = request.headers.get('X-API-Key', '')
         token = auth_header[7:] if auth_header.startswith('Bearer ') else api_key_header
-        if token != DEINEI_API_KEY:
+        if not token or not hmac.compare_digest(token, DEINEI_API_KEY):
             return jsonify({'error': 'Unauthorized: Invalid or missing API key'}), 401
 
     # 1. DNS Rebinding 対策: Host ヘッダーの厳格検証
@@ -127,8 +131,10 @@ def security_shield():
             if ref_origin not in ALLOWED_ORIGINS:
                 return jsonify({'error': 'Cross-origin request forbidden (invalid referer)'}), 403
         else:
-            # Origin も Referer も存在しない場合
-            # Fetch Metadata (Sec-Fetch-Site) がブラウザから付与されている場合は検証
+            # [意図的仕様] Origin も Referer も存在しない場合:
+            # ブラウザからのクロスサイトリクエスト (fetch, form POST等) は必ず Origin または Referer が付与される。
+            # いずれも存在しないリクエストはローカルCLI（curl, pythonスクリプト, 自動バッチ等）用途として許可する。
+            # ただしブラウザが Sec-Fetch-Site を付与している場合は cross-site を厳格に拒否する。
             sec_fetch_site = request.headers.get('Sec-Fetch-Site')
             if sec_fetch_site and sec_fetch_site not in ('same-origin', 'none'):
                 return jsonify({'error': 'Cross-site request forbidden'}), 403
@@ -384,14 +390,10 @@ CHATS_DIR = os.path.join(BASE_DIR, 'chats')
 if not os.path.exists(CHATS_DIR):
     os.makedirs(CHATS_DIR)
 
-def is_safe_session_id(session_id: str) -> bool:
-    """セッションIDが安全な形式（英数字、ハイフン、アンダースコアのみ、1〜64文字）かを判定"""
-    if not session_id or not isinstance(session_id, str):
-        return False
-    return bool(re.match(r'^[a-zA-Z0-9_-]{1,64}$', session_id))
+from session_validator import is_safe_session_id
 
 def get_safe_session_path(session_id: str) -> str | None:
-    """パストラバーサルを完全に遮断し、CHATS_DIR配下の絶対パスのみを返す"""
+    """パストラバーサルおよびWindows予約名を完全に遮断し、CHATS_DIR配下の絶対パスのみを返す"""
     if not is_safe_session_id(session_id):
         return None
     chats_abs = os.path.abspath(CHATS_DIR)
@@ -2330,7 +2332,7 @@ if __name__ == '__main__':
     print('   → [Security] Host検査 & CSRF検査 有効 (127.0.0.1 バインド)')
     print('================================================================')
     try:
-        app.run(host='127.0.0.1', port=5000, threaded=True)
+        app.run(host=BIND_HOST, port=SERVER_PORT, threaded=True)
     except OSError as e:
         if getattr(e, 'winerror', None) == 10048 or 'address already in use' in str(e).lower():
             print("\n❌ [ポート競合エラー] ポート 5000 が既に他のプロセスで使用されています！")
