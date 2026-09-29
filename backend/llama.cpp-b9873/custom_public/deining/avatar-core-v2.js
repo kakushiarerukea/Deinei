@@ -9,6 +9,30 @@
     window.fetch = async function (url, options) {
         const urlStr = String(url);
 
+        // [Security] 宛先ホワイトリスト検査 (同一オリジン、または localhost/127.0.0.1 の 5000/5001/8080)
+        try {
+            const parsedUrl = new URL(urlStr, window.location.href);
+            const isBlobOrData = parsedUrl.protocol === 'blob:' || parsedUrl.protocol === 'data:';
+            const isSameOrigin = parsedUrl.origin === window.location.origin;
+            const isAllowedLocalHost = (parsedUrl.hostname === '127.0.0.1' || parsedUrl.hostname === 'localhost') &&
+                                       ['5000', '5001', '8080'].includes(parsedUrl.port || (parsedUrl.protocol === 'http:' ? '80' : '443'));
+
+            if (!isBlobOrData && !isSameOrigin && !isAllowedLocalHost) {
+                console.warn('[Security] Blocked external fetch to unauthorized destination:', urlStr);
+                return new Response(JSON.stringify({ error: 'Blocked by avatar-core security policy' }), {
+                    status: 403,
+                    statusText: 'Forbidden',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            }
+        } catch (e) {
+            console.warn('[Security] Blocked invalid fetch URL:', urlStr, e);
+            return new Response(JSON.stringify({ error: 'Invalid URL blocked' }), {
+                status: 400,
+                statusText: 'Bad Request'
+            });
+        }
+
         // 1. ulvm2_0001.model3.json のインターセプト（Expressionsが空なら動的補完）
         if (urlStr.includes('ulvm2_0001.model3.json') || urlStr.includes('銀髪の女の子')) {
             try {
