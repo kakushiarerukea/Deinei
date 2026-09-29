@@ -17,6 +17,11 @@ from flask import Flask, request, jsonify, send_from_directory, Response, stream
 import json, uuid, threading, re, logging, time, hashlib, base64, hmac
 from datetime import datetime
 import requests as http_requests
+from search_trigger import should_trigger_search
+
+# Stage 1番兵値（「検索不要」の明示的判定）
+STAGE1_NONE = "__STAGE1_NONE__"
+
 
 # ====== インメモリ検索結果キャッシュ (Flask終了時に自動破棄) ======
 _SEARCH_CACHE = {}  # { query_key: {"results": [...], "timestamp": float} }
@@ -1434,25 +1439,37 @@ def _do_web_search(query_text):
         clean_query = _extract_search_keywords(query_text)
         
         results = []
+        start_time = time.time()
+        TOTAL_TIMEOUT = 10.0
+        BACKEND_TIMEOUT = 3
+
         # 時事問題・ニュース系のクエリならDDGS news検索を優先
         is_news_likely = any(k in query_text for k in ['総理', '首相', '大臣', '大統領', '政治', '事件', '事故', '速報', 'ニュース', '発表', '発売', '引退', '結婚', '最新'])
         if is_news_likely:
             try:
-                news_items = list(DDGS().news(clean_query, max_results=3, region='jp-jp'))
-                for r in news_items:
-                    results.append({
-                        'title': r.get('title', ''),
-                        'body': f"{r.get('date', '')[:10]} - {r.get('body', '')}",
-                        'href': r.get('url', '') or r.get('href', '')
-                    })
+                time_left = TOTAL_TIMEOUT - (time.time() - start_time)
+                if time_left > 0:
+                    news_timeout = max(1, min(BACKEND_TIMEOUT, int(time_left)))
+                    news_items = list(DDGS(timeout=news_timeout).news(clean_query, max_results=3, region='jp-jp'))
+                    for r in news_items:
+                        results.append({
+                            'title': r.get('title', ''),
+                            'body': f"{r.get('date', '')[:10]} - {r.get('body', '')}",
+                            'href': r.get('url', '') or r.get('href', '')
+                        })
             except Exception as ne:
                 print(f"⚠️ DuckDuckGo News検索エラー (通常検索へフォールバック): {ne}")
 
         # 通常テキスト検索 (多段階フォールバック: API -> HTML -> Lite -> 短縮キーワード -> Wikipedia)
         if not results:
             for backend in ('api', 'html', 'lite'):
+                time_left = TOTAL_TIMEOUT - (time.time() - start_time)
+                if time_left <= 0:
+                    _search_logger.debug("DDGS タイムアウト予算超過 (10s)")
+                    break
                 try:
-                    res = list(DDGS().text(clean_query, max_results=3, region='jp-jp', backend=backend))
+                    call_timeout = max(1, min(BACKEND_TIMEOUT, int(time_left)))
+                    res = list(DDGS(timeout=call_timeout).text(clean_query, max_results=3, region='jp-jp', backend=backend))
                     if res:
                         results = res
                         break
@@ -1467,35 +1484,47 @@ def _do_web_search(query_text):
                     short_kw = ' '.join(words[:2])
                     print(f"🔄 短縮キーワードで再試行: '{short_kw}'")
                     for backend in ('api', 'html', 'lite'):
+                        time_left = TOTAL_TIMEOUT - (time.time() - start_time)
+                        if time_left <= 0:
+                            break
                         try:
-                            res = list(DDGS().text(short_kw, max_results=3, region='jp-jp', backend=backend))
+                            call_timeout = max(1, min(BACKEND_TIMEOUT, int(time_left)))
+                            res = list(DDGS(timeout=call_timeout).text(short_kw, max_results=3, region='jp-jp', backend=backend))
                             if res:
                                 results = res
                                 break
                         except Exception:
                             continue
 
-            # 最終フォールバック: Wikipedia 日本語概要検索 (百科事典・人物・用語等の即時要約)
-            if not results:
-                try:
-                    wiki_target = clean_query.split()[0] if clean_query else ''
-                    if wiki_target:
-                        wiki_url = f"https://ja.wikipedia.org/api/rest_v1/page/summary/{wiki_target}"
-                        w_res = http_requests.get(wiki_url, timeout=3, headers={'User-Agent': 'Deinei-AI-Assistant/1.0'})
-                        if w_res.status_code == 200:
-                            w_data = w_res.json()
-                            extract = w_data.get('extract', '')
-                            w_title = w_data.get('title', wiki_target)
-                            w_page = w_data.get('content_urls', {}).get('desktop', {}).get('page', '')
-                            if extract:
-                                results.append({
-                                    'title': f"{w_title} (Wikipedia)",
-                                    'body': extract,
-                                    'href': w_page
-                                })
-                                print(f"📖 Wikipedia フォールバックから概要を取得しました: {w_title}")
-                except Exception as we:
-                    _search_logger.debug(f"Wikipedia フォールバック取得エラー: {we}")
+            # 最終フォールバック: Wikipedia 日本語概要検索 (既定で無効、環境変数 DEINEI_WIKI_FALLBACK=1 でオプトイン)
+            wiki_fallback_enabled = os.environ.get('DEINEI_WIKI_FALLBACK', '0').strip() == '1'
+            if not results and wiki_fallback_enabled:
+                time_left = TOTAL_TIMEOUT - (time.time() - start_time)
+                if time_left > 0:
+                    try:
+                        wiki_target = clean_query.split()[0] if clean_query else ''
+                        if wiki_target:
+                            wiki_url = f"https://ja.wikipedia.org/api/rest_v1/page/summary/{wiki_target}"
+                            call_timeout = min(float(BACKEND_TIMEOUT), max(1.0, float(time_left)))
+                            w_res = http_requests.get(
+                                wiki_url,
+                                timeout=call_timeout,
+                                headers={'User-Agent': 'Deinei-AI-Assistant/1.0 (https://github.com/kakushiarerukea/Deinei)'}
+                            )
+                            if w_res.status_code == 200:
+                                w_data = w_res.json()
+                                extract = w_data.get('extract', '')
+                                w_title = w_data.get('title', wiki_target)
+                                w_page = w_data.get('content_urls', {}).get('desktop', {}).get('page', '')
+                                if extract:
+                                    results.append({
+                                        'title': f"{w_title} (Wikipedia)",
+                                        'body': extract,
+                                        'href': w_page
+                                    })
+                                    print(f"📖 Wikipedia フォールバックから概要を取得しました: {w_title}")
+                    except Exception as we:
+                        _search_logger.debug(f"Wikipedia フォールバック取得エラー: {we}")
 
         formatted = []
         for r in results:
@@ -1635,18 +1664,20 @@ def _decide_and_generate_search_query(user_text, recent_history=None, user_conte
                 search_query = first_line.replace('SEARCH:', '').strip()
                 if search_query and search_query.upper() != 'NONE':
                     return search_query
-            elif first_line.upper() == 'NONE' or 'NONE' in first_line.upper():
-                return None
+                return STAGE1_NONE
+            elif first_line.upper() == 'NONE' or 'NONE' in first_line.upper() or any(neg in first_line for neg in ['不要', 'なし']):
+                return STAGE1_NONE
             else:
                 # SEARCH: プレフィックスがないが単語が出力された場合
-                if len(first_line) > 1 and not any(neg in first_line for neg in ['不要', 'なし', 'None', 'NONE']):
+                if len(first_line) > 1:
                     return first_line
+                return STAGE1_NONE
         else:
             print(f"⚠️ Stage 1 リクエスト失敗 (ステータス: {resp.status_code})")
+            return None
     except Exception as e:
         print(f"⚠️ Stage 1 検索判定エラー: {e}")
-
-    return None
+        return None
 
 # ====== Web検索オン/オフ トグル API ======
 @app.route('/api/search/toggle', methods=['POST'])
@@ -1750,23 +1781,28 @@ def proxy_chat_completions():
                 has_image = any(isinstance(it, dict) and it.get('type') == 'image_url' for it in raw_user_content)
 
             req_search_enabled = payload.get('search_enabled', _SEARCH_ENABLED)
-            clean_user_text_lower = clean_user_text.lower()
-            should_check_search = req_search_enabled and (
-                any(kw.lower() in clean_user_text_lower for kw in _SEARCH_TRIGGER_KEYWORDS) or
-                (has_image and any(kw in clean_user_text_lower for kw in ['何', '誰', 'これ', 'この', '本', '画像', '写真', '教え', '詳細', 'あらすじ', '内容', 'について', 'what', 'who', 'this', 'image', 'photo', 'picture', 'details', 'summary', 'about']))
-            )
+            should_check_search = req_search_enabled and should_trigger_search(clean_user_text)
 
             if should_check_search:
-                # キーワード/画像検知 → LLM (Stage 1) でマルチモーダルな最適検索ワードを生成
+                # 明示的検索意図を検知 → LLM (Stage 1) で文脈や画像を踏まえた最適検索ワードを生成
                 try:
                     recent_history = [m for m in messages[:-1] if m.get('role') in ['user', 'assistant']]
-                    search_query = _decide_and_generate_search_query(user_text, recent_history, user_content=raw_user_content)
+                    stage1_res = _decide_and_generate_search_query(user_text, recent_history, user_content=raw_user_content)
                 except Exception as e:
                     _search_logger.debug(f"[Stage 1 例外] {type(e).__name__}: {e}")
+                    stage1_res = None
+
+                # Stage 1 の戻り値処理:
+                # - STAGE1_NONE: LLMが「検索不要」と明示判定 -> 検索せず、フォールバックも行わない
+                # - 有効文字列: そのクエリで検索実行
+                # - None: Stage 1の例外・タイムアウト・HTTPエラー・空応答時のみキーワード抽出にフォールバック
+                if stage1_res is STAGE1_NONE:
                     search_query = None
-                # LLM失敗時はルールベースのキーワード抽出にフォールバック
-                if not search_query:
+                elif stage1_res:
+                    search_query = stage1_res
+                else:
                     search_query = _extract_search_keywords(clean_user_text)
+
                 if search_query:
                     print(f"🔍 検索: '{search_query}'")
                     web_results = _do_web_search(search_query)
