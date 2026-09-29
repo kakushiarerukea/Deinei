@@ -262,7 +262,8 @@ export const GLOB_PATTERNS: string[] = [
 // The SvelteKit PWA manifest transform strips the html extension from every
 // precache entry to match clean URLs, but loading.html is a plain static asset
 // with no clean URL, so static servers answer 404 and the SW install fails.
-export const GLOB_IGNORES: string[] = ['**/loading.html'];
+// Also exclude assets with '#' in filenames which cause 404s due to URL fragment handling.
+export const GLOB_IGNORES: string[] = ['**/loading.html', '**/L2D_#595656.svg', '**/*#*'];
 
 export const SW_CONFIG = {
 	CHECK_INTERVAL_MS: 60000,
