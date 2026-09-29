@@ -87,7 +87,7 @@ try:
         r"/health": {"origins": "*"},
         r"/": {"origins": "*"},
         r"/*": {"origins": list(ALLOWED_ORIGINS)}
-    }, expose_headers=["X-Deining-Recalled-Memories", "Content-Type"])
+    }, allow_headers="*", expose_headers=["X-Deining-Recalled-Memories", "Content-Type"])
     print(f"✅ CORS 有効化済み (許可オリジン: {', '.join(sorted(ALLOWED_ORIGINS))}, /health は全開放)")
 except ImportError:
     pass
@@ -136,17 +136,19 @@ def security_shield():
 @app.after_request
 def add_cors_headers(response):
     req_origin = request.headers.get('Origin')
+    req_headers = request.headers.get('Access-Control-Request-Headers')
+
     # ヘルスチェック (安全な読み取り) の場合はローカルスプラッシュ画面 (file:/// 等) からの確認を許可
     if request.path in ('/', '/health') and request.method in ('GET', 'HEAD', 'OPTIONS'):
         response.headers['Access-Control-Allow-Origin'] = req_origin if req_origin else '*'
         response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+        response.headers['Access-Control-Allow-Headers'] = req_headers if req_headers else '*'
         return response
 
     if req_origin and req_origin.rstrip('/') in ALLOWED_ORIGINS:
         response.headers['Access-Control-Allow-Origin'] = req_origin
         response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+        response.headers['Access-Control-Allow-Headers'] = req_headers if req_headers else '*'
         response.headers['Access-Control-Expose-Headers'] = 'X-Deining-Recalled-Memories, Content-Type'
     return response
 
