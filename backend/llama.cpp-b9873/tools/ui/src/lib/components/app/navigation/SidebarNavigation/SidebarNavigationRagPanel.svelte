@@ -86,13 +86,18 @@
 			try {
 				const convId = conversationsStore.activeConversation?.id;
 				const currNode = conversationsStore.activeConversation?.currNode || '';
+				const activeMessageIds = conversationsStore.activeMessages?.map(m => m.id) || [];
 				const url = convId
 					? `http://localhost:5000/memory/add?session_id=${convId}${currNode ? `&message_id=${currNode}` : ''}`
 					: 'http://localhost:5000/memory/add';
 				await fetch(url, {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ text, message_id: currNode })
+					body: JSON.stringify({
+						text,
+						message_id: currNode,
+						active_message_ids: activeMessageIds
+					})
 				});
 				await fetchMemories();
 			} catch (e) {

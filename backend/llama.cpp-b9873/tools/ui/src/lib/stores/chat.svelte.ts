@@ -116,10 +116,10 @@ export function getSummaryConfig() {
 	if (typeof localStorage === 'undefined') {
 		return {
 			summaryPrompt: DEFAULT_SUMMARY_SYSTEM_PROMPT,
-			summaryTemp: 1.1,
+			summaryTemp: 0.4,
 			summaryMaxTokens: 4096,
 			factPrompt: DEFAULT_FACT_SYSTEM_PROMPT,
-			factTemp: 0.6,
+			factTemp: 0.2,
 			factMaxTokens: 4096
 		};
 	}
@@ -146,10 +146,10 @@ export function getSummaryConfig() {
 
 	return {
 		summaryPrompt: savedSummaryPrompt || DEFAULT_SUMMARY_SYSTEM_PROMPT,
-		summaryTemp: parseFloat(localStorage.getItem('deining_summary_temp') || '1.1'),
+		summaryTemp: parseFloat(localStorage.getItem('deining_summary_temp') || '0.4'),
 		summaryMaxTokens: parseInt(localStorage.getItem('deining_summary_max_tokens') || '4096', 10),
 		factPrompt: savedFactPrompt || DEFAULT_FACT_SYSTEM_PROMPT,
-		factTemp: parseFloat(localStorage.getItem('deining_fact_temp') || '0.6'),
+		factTemp: parseFloat(localStorage.getItem('deining_fact_temp') || '0.2'),
 		factMaxTokens: parseInt(localStorage.getItem('deining_fact_max_tokens') || '4096', 10)
 	};
 }
@@ -191,6 +191,7 @@ class ChatStore {
 	private preEncodeAbortController: AbortController | null = null;
 	private processingStates = new SvelteMap<string, ApiProcessingState | null>();
 	private conversationStateTimestamps = new SvelteMap<string, ConversationStateEntry>();
+	private summaryFailuresByConv = new SvelteMap<string, number>();
 	private activeConversationId = $state<string | null>(null);
 	private isStreamingActive = $state(false);
 	private isEditModeActive = $state(false);
@@ -1121,9 +1122,10 @@ class ChatStore {
 			this.summarizeStatusText = t('toast.organizingMemory', { seconds: elapsed }, `Organizing memory... ${elapsed}s`);
 		}, 1000);
 
+		const messagesToSummarize = displayMessages.slice(lastIdx, endIdx);
+
 		try {
 			const targetMsgId = displayMessages[endIdx - 1]?.id || activeConv.currNode || '';
-			const messagesToSummarize = displayMessages.slice(lastIdx, endIdx);
 			let logText = '';
 			for (const msg of messagesToSummarize) {
 				let content = msg.content;
@@ -1156,90 +1158,114 @@ class ChatStore {
 			const summaryModel = currentConfig.summaryModel?.toString().trim() || 'main';
 			const isSummaryModelMain = !summaryModel || summaryModel === 'main';
 
-			// --- 1. あらすじ要約の実行 ---
+			// --- 1. あらすじ要約の実行 (Rebuild経路同様の再試行付き: 失敗時は温度0.7、最大2回) ---
 			let summaryText = '';
 			this.lastSummaryReasoning = '';
-			if (isSummaryModelMain) {
-				const response = await fetch(API_CHAT.COMPLETIONS, {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-						...getAuthHeaders()
-					},
-					body: JSON.stringify({
-						model: selectedModelName() || undefined,
-						messages: [
-							{
-								role: 'system',
-								content: sumCfg.summaryPrompt
-							},
-							{
-								role: 'user',
-								content: fullPrompt
-							}
-						],
-						stream: false,
-						temperature: sumCfg.summaryTemp,
-						max_tokens: sumCfg.summaryMaxTokens,
-						chat_template_kwargs: { enable_thinking: false }
-					})
-				});
+			let attempts = 0;
+			const maxAttempts = 2;
 
-				if (response.ok) {
-					const resData = await response.json();
-					const rawContent = resData.choices?.[0]?.message?.content || '';
-					// 思考プロセスの抽出
-					const thinkMatch = rawContent.match(/<think>([\s\S]*?)<\/think>/i);
-					if (thinkMatch) {
-						this.lastSummaryReasoning = thinkMatch[1].trim();
-					}
-					summaryText = rawContent.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-				} else {
-					console.warn('Failed to summarize using main model:', response.statusText);
-				}
-			} else {
-				const response = await fetch('http://localhost:11434/api/chat', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({
-						model: summaryModel,
-						messages: [
-							{
-								role: 'system',
-								content: sumCfg.summaryPrompt
+			while (!summaryText && attempts < maxAttempts) {
+				attempts++;
+				try {
+					if (isSummaryModelMain) {
+						const response = await fetch(API_CHAT.COMPLETIONS, {
+							method: 'POST',
+							headers: {
+								'Content-Type': 'application/json',
+								...getAuthHeaders()
 							},
-							{
-								role: 'user',
-								content: fullPrompt
+							body: JSON.stringify({
+								model: selectedModelName() || undefined,
+								messages: [
+									{
+										role: 'system',
+										content: sumCfg.summaryPrompt
+									},
+									{
+										role: 'user',
+										content: fullPrompt
+									}
+								],
+								stream: false,
+								temperature: attempts > 1 ? 0.7 : sumCfg.summaryTemp,
+								max_tokens: sumCfg.summaryMaxTokens,
+								chat_template_kwargs: { enable_thinking: false }
+							})
+						});
+
+						if (response.ok) {
+							const resData = await response.json();
+							const rawContent = resData.choices?.[0]?.message?.content || '';
+							// 思考プロセスの抽出
+							const thinkMatch = rawContent.match(/<think>([\s\S]*?)<\/think>/i);
+							if (thinkMatch) {
+								this.lastSummaryReasoning = thinkMatch[1].trim();
 							}
-						],
-						stream: false,
-						options: {
-							temperature: sumCfg.summaryTemp,
-							num_predict: sumCfg.summaryMaxTokens
+							summaryText = rawContent.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+						} else {
+							console.warn(`[AutoSummarize] Failed to summarize using main model (Attempt ${attempts}):`, response.statusText);
 						}
-					})
-				});
+					} else {
+						const response = await fetch('http://localhost:11434/api/chat', {
+							method: 'POST',
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify({
+								model: summaryModel,
+								messages: [
+									{
+										role: 'system',
+										content: sumCfg.summaryPrompt
+									},
+									{
+										role: 'user',
+										content: fullPrompt
+									}
+								],
+								stream: false,
+								options: {
+									temperature: attempts > 1 ? 0.7 : sumCfg.summaryTemp,
+									num_predict: sumCfg.summaryMaxTokens
+								}
+							})
+						});
 
-				if (response.ok) {
-					const resData = await response.json();
-					const rawContent = resData.message?.content || '';
-					// 思考プロセスの抽出
-					const thinkMatch = rawContent.match(/<think>([\s\S]*?)<\/think>/i);
-					if (thinkMatch) {
-						this.lastSummaryReasoning = thinkMatch[1].trim();
+						if (response.ok) {
+							const resData = await response.json();
+							const rawContent = resData.message?.content || '';
+							// 思考プロセスの抽出
+							const thinkMatch = rawContent.match(/<think>([\s\S]*?)<\/think>/i);
+							if (thinkMatch) {
+								this.lastSummaryReasoning = thinkMatch[1].trim();
+							}
+							summaryText = rawContent.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+						} else {
+							console.warn(`[AutoSummarize] Failed to summarize using Ollama (Attempt ${attempts}):`, response.statusText);
+						}
 					}
-					summaryText = rawContent.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-				} else {
-					console.warn('Failed to summarize using Ollama:', response.statusText);
+				} catch (sumErr) {
+					console.error(`[AutoSummarize] Error during summary generation (Attempt ${attempts}):`, sumErr);
 				}
 			}
 
 			this.lastSummaryOutput = summaryText;
 
 			if (!summaryText || !summaryText.trim()) {
-				console.warn('[AutoSummarize] 要約文の生成に失敗（空の出力）したため、インデックスの更新を中断しメッセージを保護します。次回ターンで安全に再試行されます。');
-				return;
+				const currentFails = (this.summaryFailuresByConv.get(activeConv.id) || 0) + 1;
+				this.summaryFailuresByConv.set(activeConv.id, currentFails);
+				const unsummarizedCount = displayMessages.length - (activeConv.lastSummarizedIndex ?? 0);
+
+				if (currentFails >= 3 || unsummarizedCount >= 38) {
+					console.warn(`[AutoSummarize] 連続${currentFails}回失敗、または未要約件数(${unsummarizedCount}件)上限に達したため、フォールバックブロックを作成してインデックスを進めます。`);
+					const firstMsgContent = messagesToSummarize[0]?.content?.replace(/<think>[\s\S]*?<\/think>/gi, '').trim().slice(0, 40) || '';
+					const lastMsgContent = messagesToSummarize[messagesToSummarize.length - 1]?.content?.replace(/<think>[\s\S]*?<\/think>/gi, '').trim().slice(0, 40) || '';
+					summaryText = `【エピソード整理】ユーザーとAIの会話展開（"${firstMsgContent}..." 〜 "${lastMsgContent}..." に関するやり取り）。`;
+					this.summaryFailuresByConv.set(activeConv.id, 0);
+				} else {
+					console.warn(`[AutoSummarize] 要約文の生成に失敗 (${currentFails}/3回目, 未要約${unsummarizedCount}件)。生ログを保持し、インデックスは進めずに次回ターンで再試行します。`);
+					return;
+				}
+			} else {
+				this.summaryFailuresByConv.set(activeConv.id, 0);
 			}
 
 			let indexUpdated = false;
@@ -1433,7 +1459,11 @@ class ChatStore {
 						const memoryRes = await fetch(memoryApiUrl, {
 							method: 'POST',
 							headers: { 'Content-Type': 'application/json' },
-							body: JSON.stringify({ texts: facts, message_id: targetMsgId })
+							body: JSON.stringify({
+								texts: facts,
+								message_id: targetMsgId,
+								active_message_ids: displayMessages.map(m => m.id)
+							})
 						});
 						if (memoryRes.ok) {
 							const memData = await memoryRes.json();
@@ -1453,40 +1483,51 @@ class ChatStore {
 			}
 		} catch (error) {
 			console.error('要約・事実抽出処理エラー:', error);
-			// エラーが発生し、かつインデックス更新がまだ行われていなかった場合は、
-			// 送信毎の無限ループを防ぐため、エラーでもインデックスだけは強制的に前進させます。
 			if (!indexUpdated) {
-				try {
-					const dbUpdates: Record<string, any> = {
-						lastSummarizedIndex: endIdx,
-						aiHistoryTextList: activeConv.aiHistoryTextList ?? [],
-						isSlidingActive: activeConv.isSlidingActive ?? false
-					};
-					await DatabaseService.updateConversation(activeConv.id, dbUpdates);
-					conversationsStore.activeConversation = {
-						...activeConv,
-						...dbUpdates
-					};
-					const currentActiveMessages = conversationsStore.activeConversation
-						? this.getActiveMessages(conversationsStore.activeConversation)
-						: displayMessages;
-					const currentDisplayMsgs = currentActiveMessages.filter(
-						(m) => m.role !== MessageRole.SYSTEM && !(m.role === MessageRole.USER && m.type === MessageType.SYSTEM)
-					);
+				const currentFails = (this.summaryFailuresByConv.get(activeConv.id) || 0) + 1;
+				this.summaryFailuresByConv.set(activeConv.id, currentFails);
+				const unsummarizedCount = displayMessages.length - (activeConv.lastSummarizedIndex ?? 0);
+				if (currentFails >= 3 || unsummarizedCount >= 38) {
+					console.warn(`[AutoSummarize Catch] 連続${currentFails}回失敗または未要約上限(${unsummarizedCount}件)到達。フォールバック処理を実行します。`);
+					try {
+						const firstMsgContent = messagesToSummarize[0]?.content?.replace(/<think>[\s\S]*?<\/think>/gi, '').trim().slice(0, 40) || '';
+						const lastMsgContent = messagesToSummarize[messagesToSummarize.length - 1]?.content?.replace(/<think>[\s\S]*?<\/think>/gi, '').trim().slice(0, 40) || '';
+						const fallbackSummary = `【エピソード整理】ユーザーとAIの会話展開（"${firstMsgContent}..." 〜 "${lastMsgContent}..." に関するやり取り）。`;
+						const currentList = [...(activeConv.aiHistoryTextList ?? []), fallbackSummary];
+						const dbUpdates: Record<string, any> = {
+							lastSummarizedIndex: endIdx,
+							aiHistoryText: fallbackSummary,
+							aiHistoryTextList: currentList,
+							isSlidingActive: activeConv.isSlidingActive ?? false
+						};
+						await DatabaseService.updateConversation(activeConv.id, dbUpdates);
+						conversationsStore.activeConversation = {
+							...activeConv,
+							...dbUpdates
+						};
+						const currentActiveMessages = conversationsStore.activeConversation
+							? this.getActiveMessages(conversationsStore.activeConversation)
+							: displayMessages;
+						const currentDisplayMsgs = currentActiveMessages.filter(
+							(m) => m.role !== MessageRole.SYSTEM && !(m.role === MessageRole.USER && m.type === MessageType.SYSTEM)
+						);
 
-					for (let i = endIdx - 1; i < currentDisplayMsgs.length; i++) {
-						const msg = currentDisplayMsgs[i];
-						if (msg) {
-							await DatabaseService.updateMessage(msg.id, {
-								lastSummarizedIndexSnapshot: endIdx,
-								aiHistoryTextListSnapshot: activeConv.aiHistoryTextList ?? [],
-								isSlidingActiveSnapshot: activeConv.isSlidingActive ?? false
-							});
+						for (let i = endIdx - 1; i < currentDisplayMsgs.length; i++) {
+							const msg = currentDisplayMsgs[i];
+							if (msg) {
+								await DatabaseService.updateMessage(msg.id, {
+									lastSummarizedIndexSnapshot: endIdx,
+									aiHistoryTextListSnapshot: currentList,
+									isSlidingActiveSnapshot: activeConv.isSlidingActive ?? false
+								});
+							}
 						}
+						this.summaryFailuresByConv.set(activeConv.id, 0);
+					} catch (dbErr) {
+						console.error('[AutoSummarize Catch] フォールバック更新失敗:', dbErr);
 					}
-					console.log('[要約エラー対策] エラーのため、lastSummarizedIndex を強制的に前進させました:', endIdx);
-				} catch (dbErr) {
-					console.error('要約エラー時の強制インデックス更新失敗:', dbErr);
+				} else {
+					console.warn(`[AutoSummarize Catch] 要約エラー発生 (${currentFails}/3回目, 未要約${unsummarizedCount}件)。生ログを保持し、インデックスは進めません。`);
 				}
 			}
 		} finally {
@@ -3567,7 +3608,11 @@ class ChatStore {
 								const addResp = await fetch(`http://localhost:5000/memory/add?session_id=${convId}${blockMsgId ? `&message_id=${blockMsgId}` : ''}`, {
 									method: 'POST',
 									headers: { 'Content-Type': 'application/json' },
-									body: JSON.stringify({ texts: facts, message_id: blockMsgId })
+									body: JSON.stringify({
+										texts: facts,
+										message_id: blockMsgId,
+										active_message_ids: targetMessages.map(m => m.id)
+									})
 								});
 								console.log(`🧠 [RAG Memory Save Response]: ${addResp.status} ${addResp.statusText}`);
 								if (typeof window !== 'undefined') {

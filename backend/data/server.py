@@ -537,13 +537,31 @@ def delete_session(session_id):
         pass
     return jsonify({"ok": True})
 
+# ====== 記憶・要約・類似度定数の一元定義 ======
+# 1. 類似度 / 距離閾値
+MEMORY_ADD_SIMILARITY_THRESHOLD = 0.08  # /memory/add コサイン距離閾値 (0.08以下 = 実質同一事実として重複判定)
+FACT_SEARCH_MAX_DISTANCE = 0.170        # Fact記憶検索 コサイン距離閾値 (0.170以下 = 類似度0.83以上)
+EPISODE_SEARCH_MAX_DISTANCE = 0.150     # Episode記憶検索 (親子リトリーバル) コサイン距離閾値 (0.150以下 = 類似度0.85以上)
+DEDUP_SIMILARITY_THRESHOLD = 0.92       # /memory/deduplicate コサイン類似度閾値 (0.92以上で統合)
+
+# 2. 風化ペナルティ (created_at基準)
+FACT_DECAY_RATE_PER_DAY = 0.02          # Fact記憶 1日あたりの距離加算ペナルティ
+FACT_DECAY_MAX_PENALTY = 1.0            # Fact記憶 最大風化ペナルティ
+EPISODE_DECAY_RATE_PER_DAY = 0.002      # Episode記憶 1日あたりの距離加算ペナルティ
+EPISODE_DECAY_MAX_PENALTY = 0.1         # Episode記憶 最大風化ペナルティ
+
+# 3. 要約ブロック定数 (UI側と整合)
+MAX_SUMMARY_BLOCKS = 16                 # 会話履歴に保持する最大要約ブロック数
+FORGET_BLOCKS_COUNT = 2                 # 上限到達時に押し出されるブロック数
+
 # ====== 長期記憶（RAG）API ======
 
 @app.route('/memory/add', methods=['POST'])
 def add_memory():
-    """記憶を追加・類似記憶の自動統合上書きを行う。
-    リクエストボディ: { "texts": ["事実1", "事実2", ...], "message_id": "..." }
-    コサイン類似度が著しく高い既存記憶が存在する場合、テキストおよび登録日時を最新のものへ統合上書きする。
+    """記憶を追加・類似記憶の重複判定を行う。
+    リクエストボディ: { "texts": ["事実1", "事実2", ...], "message_id": "...", "active_message_ids": [...] }
+    active_message_ids が渡された場合のみ、現在の世界線内または message_id なしの既存記憶と重複判定を行う。
+    重複時はテキストや登録日時は上書きせず、updated_at のみ更新する。
     """
     data = request.get_json() or {}
     texts = data.get('texts', [])
@@ -555,13 +573,14 @@ def add_memory():
 
     session_id = request.args.get('session_id') or data.get('session_id') or 'default_session'
     message_id = request.args.get('message_id') or data.get('message_id')
+    active_message_ids = data.get('active_message_ids')
     collection = get_memory_collection(session_id)
     from datetime import datetime
 
-    SIMILARITY_THRESHOLD = 0.08  # コサイン距離の厳格な閾値 (0.08以下 = 実質同義・極めて類似した表現のみ統合上書き)
-
     added_count = 0
     updated_count = 0
+
+    active_ids_set = set(str(mid) for mid in active_message_ids) if active_message_ids else None
 
     for raw_t in texts:
         t = raw_t.strip()
@@ -570,45 +589,64 @@ def add_memory():
 
         existing_match_id = None
         existing_doc = None
+        existing_meta = None
         min_dist = 1.0
 
-        if collection.count() > 0:
+        # active_message_ids が提供されている場合のみ重複判定を行う
+        if active_ids_set is not None and collection.count() > 0:
             try:
                 res = collection.query(
                     query_texts=[t],
-                    n_results=1,
+                    n_results=min(5, collection.count()),
                     where={"channel_id": "web_ui"}
                 )
                 if res and res.get('documents') and res['documents'][0]:
-                    dist = res['distances'][0][0]
-                    if dist <= SIMILARITY_THRESHOLD:
-                        existing_match_id = res['ids'][0][0]
-                        existing_doc = res['documents'][0][0]
-                        min_dist = dist
+                    docs = res['documents'][0]
+                    distances = res['distances'][0]
+                    metadatas = res['metadatas'][0]
+                    ids = res['ids'][0]
+
+                    for cand_id, cand_doc, cand_dist, cand_meta in zip(ids, docs, distances, metadatas):
+                        cand_meta = cand_meta or {}
+                        cand_msg_id = cand_meta.get('message_id')
+                        # 条件: 距離 ≤ 0.08、かつ message_id が無い、または active_message_ids に含まれる
+                        is_worldline_ok = (not cand_msg_id) or (str(cand_msg_id) in active_ids_set)
+                        if cand_dist <= MEMORY_ADD_SIMILARITY_THRESHOLD and is_worldline_ok:
+                            if cand_dist < min_dist:
+                                min_dist = cand_dist
+                                existing_match_id = cand_id
+                                existing_doc = cand_doc
+                                existing_meta = cand_meta
             except Exception as e:
                 print(f"⚠️ 類似記憶チェック中にエラー: {e}")
 
         now_iso = datetime.now().isoformat()
-        meta_dict = {
-            "timestamp": now_iso,
-            "type": "fact",
-            "channel_id": "web_ui"
-        }
-        if message_id:
-            meta_dict["message_id"] = str(message_id)
 
         if existing_match_id:
-            # 著しく類似した既存記憶が存在するため、最新テキストと現在日時で上書き更新
+            # 重複時は既存のテキスト・message_id・登録日時を上書きせず、updated_at のみ更新
+            updated_meta = dict(existing_meta) if existing_meta else {}
+            updated_meta['updated_at'] = now_iso
+            if 'created_at' not in updated_meta:
+                updated_meta['created_at'] = updated_meta.get('timestamp') or now_iso
             collection.update(
                 ids=[existing_match_id],
-                documents=[t],
-                metadatas=[meta_dict]
+                metadatas=[updated_meta]
             )
-            print(f"🔄 類似記憶を上書き統合しました (距離: {min_dist:.3f}): 「{existing_doc}」 ➔ 「{t}」")
+            print(f"🔄 類似記憶の更新日時を更新しました (距離: {min_dist:.3f}): 「{existing_doc}」")
             updated_count += 1
         else:
-            # 新規の事実記憶として追加
+            # 新規の事実記憶として追加 (created_at は不変、timestamp は後方互換として保持)
             new_id = str(uuid.uuid4())
+            meta_dict = {
+                "timestamp": now_iso,
+                "created_at": now_iso,
+                "updated_at": now_iso,
+                "type": "fact",
+                "channel_id": "web_ui"
+            }
+            if message_id:
+                meta_dict["message_id"] = str(message_id)
+
             collection.add(
                 ids=[new_id],
                 documents=[t],
@@ -684,6 +722,8 @@ def add_parent_child_memory():
             "message_id": str(message_id),
             "parent_text": clean_parent,
             "timestamp": now_iso,
+            "created_at": now_iso,
+            "updated_at": now_iso,
             "last_accessed": now_iso,
             "channel_id": str(channel_id)
         })
@@ -769,24 +809,23 @@ def search_memory():
     results_list = []
     
     for mem, dist, meta in zip(memories, distances, metadatas):
-        if dist > 0.170:  # コサイン類似度 0.83 未満は除外
+        if dist > FACT_SEARCH_MAX_DISTANCE:
             continue
             
-        timestamp_str = meta.get('timestamp', '') if meta else ''
+        created_at_str = meta.get('created_at') or meta.get('timestamp', '') if meta else ''
         adjusted_dist = dist
         
-        if timestamp_str:
+        if created_at_str:
             try:
-                mem_time = datetime.fromisoformat(timestamp_str)
+                mem_time = datetime.fromisoformat(created_at_str)
                 diff = datetime.now() - mem_time
                 days = diff.total_seconds() / 86400.0
-                # 1日経過するごとに 0.02 のペナルティ（最大1.0まで）
-                penalty = min(1.0, max(0.0, days * 0.02))
+                penalty = min(FACT_DECAY_MAX_PENALTY, max(0.0, days * FACT_DECAY_RATE_PER_DAY))
                 adjusted_dist += penalty
             except Exception:
                 pass
                 
-        results_list.append((mem, adjusted_dist, meta, timestamp_str))
+        results_list.append((mem, adjusted_dist, meta, created_at_str))
 
     # 風化ペナルティを加味した距離で再ソート
     results_list.sort(key=lambda x: x[1])
@@ -794,9 +833,9 @@ def search_memory():
     results_list = results_list[:n_results]
 
     filtered = []
-    for mem, adj_dist, meta, timestamp_str in results_list:
-        if timestamp_str:
-            ts_str = timestamp_str.replace('T', ' ').split('.')[0]
+    for mem, adj_dist, meta, created_at_str in results_list:
+        if created_at_str:
+            ts_str = created_at_str.replace('T', ' ').split('.')[0]
             filtered.append(f"[{ts_str}] {mem}")
         else:
             filtered.append(mem)
@@ -865,11 +904,17 @@ def deduplicate_memories():
                 if id2 in deleted_ids:
                     continue
 
+                # 世界線をまたぐ統合の禁止（異なる message_id 同士の統合は行わない）
+                mid1 = (meta1.get('message_id') or None) if meta1 else None
+                mid2 = (meta2.get('message_id') or None) if meta2 else None
+                if mid1 != mid2:
+                    continue
+
                 emb2 = query_model.encode(doc2, convert_to_tensor=True)
                 cosine_sim = float(util.cos_sim(emb1, emb2)[0][0])
 
-                # 類似度 0.92 以上（実質的に同義・表現違いのみ）
-                if cosine_sim >= 0.92:
+                # 類似度閾値以上（実質的に同義・表現違いのみ）
+                if cosine_sim >= DEDUP_SIMILARITY_THRESHOLD:
                     # id1 (古い方) を削除し、id2 (新しい方) に統合
                     deleted_ids.add(id1)
                     merged_count += 1
@@ -1170,7 +1215,6 @@ def _search_memory_for_proxy(query_text, session_id='default_session', active_me
 
             print(f"\n{'='*25} 🧠 RAG 記憶検索デバッグ {'='*25}")
             print(f"🔍 クエリ: 「{query_text}」 (コレクション総数: {collection.count()}件)")
-            FACT_MAX_DISTANCE = 0.170  # コサイン類似度 0.83 以上 (1.0 - 0.170 = 0.83)
             if f_docs:
                 print(f"--- 🟢 Fact 記憶 検索結果 ({len(f_docs)}件候補 / 閾値: 類似度 >= 0.83) ---")
                 for doc, dist, meta in zip(f_docs, f_dists, f_metas):
@@ -1180,12 +1224,12 @@ def _search_memory_for_proxy(query_text, session_id='default_session', active_me
                         mem_msg_id = meta.get('message_id')
                         if mem_msg_id and mem_msg_id not in path_id_set:
                             is_worldline_ok = False
-                    status_str = "✅ 採用" if (dist <= FACT_MAX_DISTANCE and is_worldline_ok) else ("❌ 世界線外" if not is_worldline_ok else f"❌ 類似度不足 (類似度: {sim:.4f} < 0.83)")
+                    status_str = "✅ 採用" if (dist <= FACT_SEARCH_MAX_DISTANCE and is_worldline_ok) else ("❌ 世界線外" if not is_worldline_ok else f"❌ 類似度不足 (類似度: {sim:.4f} < 0.83)")
                     print(f"  [{status_str}] 類似度: {sim:.4f} (距離: {dist:.4f}) | 内容: {doc}")
 
             f_candidates = []
             for mem, dist, meta in zip(f_docs, f_dists, f_metas):
-                if dist > FACT_MAX_DISTANCE:
+                if dist > FACT_SEARCH_MAX_DISTANCE:
                     continue
                 # 世界線フィルタ: 別ブランチや別世界線のFactは厳格に除外
                 if meta and path_id_set is not None:
@@ -1193,25 +1237,25 @@ def _search_memory_for_proxy(query_text, session_id='default_session', active_me
                     if mem_msg_id and mem_msg_id not in path_id_set:
                         continue
 
-                timestamp_str = meta.get('timestamp', '') if meta else ''
+                created_at_str = meta.get('created_at') or meta.get('timestamp', '') if meta else ''
                 adjusted_dist = dist
-                if timestamp_str:
+                if created_at_str:
                     try:
-                        mem_time = datetime.fromisoformat(timestamp_str)
+                        mem_time = datetime.fromisoformat(created_at_str)
                         days = (now - mem_time).total_seconds() / 86400.0
-                        penalty = min(1.0, max(0.0, days * 0.02))
+                        penalty = min(FACT_DECAY_MAX_PENALTY, max(0.0, days * FACT_DECAY_RATE_PER_DAY))
                         adjusted_dist += penalty
                     except Exception:
                         pass
-                f_candidates.append((mem, adjusted_dist, timestamp_str))
+                f_candidates.append((mem, adjusted_dist, created_at_str))
 
             f_candidates.sort(key=lambda x: x[1])
             f_candidates = f_candidates[:n_results]
 
-            for mem, adj_dist, timestamp_str in f_candidates:
+            for mem, adj_dist, created_at_str in f_candidates:
                 clean_mem = mem.strip().lstrip('-').strip()
-                if timestamp_str:
-                    time_diff = get_time_difference_str(timestamp_str)
+                if created_at_str:
+                    time_diff = get_time_difference_str(created_at_str)
                     fact_memories.append(f"- [{time_diff}] {clean_mem}")
                 else:
                     fact_memories.append(f"- [過去] {clean_mem}")
@@ -1252,10 +1296,10 @@ def _search_memory_for_proxy(query_text, session_id='default_session', active_me
                     if mem_msg_id and mem_msg_id not in path_id_set:
                         is_worldline_ok = False
 
-                # 判定（類似度 0.85 以上 = 距離 <= 0.150）
+                # 判定（類似度 0.85 以上 = 距離 <= EPISODE_SEARCH_MAX_DISTANCE）
                 status_str = "✅ 採用"
-                if raw_dist > 0.150:
-                    status_str = f"❌ 類似度不足 (類似度: {sim:.4f} < 0.85 / 距離: {raw_dist:.4f} > 0.150)"
+                if raw_dist > EPISODE_SEARCH_MAX_DISTANCE:
+                    status_str = f"❌ 類似度不足 (類似度: {sim:.4f} < 0.85 / 距離: {raw_dist:.4f} > {EPISODE_SEARCH_MAX_DISTANCE})"
                 elif not is_worldline_ok:
                     status_str = f"❌ 世界線外 ({mem_msg_id})"
                 elif parent_text in seen_parents:
@@ -1263,7 +1307,7 @@ def _search_memory_for_proxy(query_text, session_id='default_session', active_me
 
                 print(f"  [{status_str}] 類似度: {sim:.4f} (距離: {raw_dist:.4f}) | キー: 「{doc}」 -> 親: {parent_preview}")
 
-                if raw_dist > 0.150:
+                if raw_dist > EPISODE_SEARCH_MAX_DISTANCE:
                     continue
 
                 if not is_worldline_ok:
@@ -1272,14 +1316,14 @@ def _search_memory_for_proxy(query_text, session_id='default_session', active_me
                 if not parent_text or parent_text in seen_parents:
                     continue
 
-                # Ranking（順位付け）用の風化ペナルティ
-                timestamp_str = meta.get('timestamp', '') if meta else ''
+                # Ranking（順位付け）用の風化ペナルティ (created_at基準)
+                created_at_str = meta.get('created_at') or meta.get('timestamp', '') if meta else ''
                 penalty = 0.0
-                if timestamp_str:
+                if created_at_str:
                     try:
-                        mem_time = datetime.fromisoformat(timestamp_str)
+                        mem_time = datetime.fromisoformat(created_at_str)
                         days = (now - mem_time).total_seconds() / 86400.0
-                        penalty = min(0.1, max(0.0, days * 0.002))
+                        penalty = min(EPISODE_DECAY_MAX_PENALTY, max(0.0, days * EPISODE_DECAY_RATE_PER_DAY))
                     except Exception:
                         pass
                 ranking_dist = raw_dist + penalty

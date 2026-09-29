@@ -72,11 +72,11 @@
 	let showPromptSettings = $state(false);
 
 	let summaryPrompt = $state(DEFAULT_SUMMARY_SYSTEM_PROMPT);
-	let summaryTemp = $state(1.1);
+	let summaryTemp = $state(0.4);
 	let summaryMaxTokens = $state(4096);
 
 	let factPrompt = $state(DEFAULT_FACT_SYSTEM_PROMPT);
-	let factTemp = $state(0.6);
+	let factTemp = $state(0.2);
 	let factMaxTokens = $state(4096);
 
 	onMount(() => {
@@ -117,10 +117,10 @@
 
 	function resetToDefaults() {
 		summaryPrompt = DEFAULT_SUMMARY_SYSTEM_PROMPT;
-		summaryTemp = 1.1;
+		summaryTemp = 0.4;
 		summaryMaxTokens = 4096;
 		factPrompt = DEFAULT_FACT_SYSTEM_PROMPT;
-		factTemp = 0.6;
+		factTemp = 0.2;
 		factMaxTokens = 4096;
 		saveSettings();
 	}
