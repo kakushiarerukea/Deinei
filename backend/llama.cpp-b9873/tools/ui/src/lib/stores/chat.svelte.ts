@@ -1237,18 +1237,22 @@ class ChatStore {
 
 			this.lastSummaryOutput = summaryText;
 
+			if (!summaryText || !summaryText.trim()) {
+				console.warn('[AutoSummarize] 要約文の生成に失敗（空の出力）したため、インデックスの更新を中断しメッセージを保護します。次回ターンで安全に再試行されます。');
+				return;
+			}
+
 			let indexUpdated = false;
 			try {
-				// 会話DBおよびスナップショットの更新（要約結果が空・エラーの場合でも lastSummarizedIndex は進めて無限ループを防止）
+				// 要約生成に成功した場合のみ、要約ブロックを追加して lastSummarizedIndex を進める（メッセージ消失防止）
 				const dbUpdates: Record<string, any> = {
-					lastSummarizedIndex: endIdx
+					lastSummarizedIndex: endIdx,
+					aiHistoryText: summaryText
 				};
 				let currentList = [...(activeConv.aiHistoryTextList ?? [])];
 				let isSlidingActive = activeConv.isSlidingActive ?? false;
 
-				if (summaryText) {
-					dbUpdates.aiHistoryText = summaryText; // レガシー互換
-					currentList.push(summaryText);
+				currentList.push(summaryText);
 
 					// リストサイズが最大値（MAX_SUMMARY_BLOCKS）に達したか検知
 					if (currentList.length >= MAX_SUMMARY_BLOCKS) {
@@ -1268,7 +1272,6 @@ class ChatStore {
 							}
 						}
 					}
-				}
 
 				dbUpdates.aiHistoryTextList = currentList;
 				dbUpdates.isSlidingActive = isSlidingActive;

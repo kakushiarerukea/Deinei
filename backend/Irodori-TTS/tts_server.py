@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Response, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
@@ -18,11 +19,61 @@ from irodori_tts.inference_runtime import (
 
 app = FastAPI()
 
+# ====== セキュリティ設定: 許可オリジン・ホストの厳格管理 ======
+ALLOWED_ORIGINS = {
+    'http://localhost:8080',
+    'http://127.0.0.1:8080',
+    'http://localhost:5000',
+    'http://127.0.0.1:5000',
+    'http://localhost:5001',
+    'http://127.0.0.1:5001',
+}
+
+ALLOWED_HOSTS = {
+    'localhost:5001',
+    '127.0.0.1:5001',
+    'localhost',
+    '127.0.0.1',
+}
+
+@app.middleware("http")
+async def security_middleware(request: Request, call_next):
+    # 1. DNS Rebinding 対策: Host ヘッダー検証
+    host = request.headers.get("host", "").lower()
+    if host and host not in ALLOWED_HOSTS:
+        return JSONResponse(status_code=400, content={"error": "Invalid Host header"})
+
+    # 2. CSRF 対策: 状態変更メソッド (非GET/HEAD/OPTIONS) に対する Origin / Referer 検査
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        origin = request.headers.get("origin")
+        referer = request.headers.get("referer")
+
+        # Origin: null は無条件で拒否
+        if origin and origin.lower() in ("null", "none"):
+            return JSONResponse(status_code=403, content={"error": "Cross-origin request forbidden (null origin)"})
+
+        if origin:
+            if origin.rstrip("/") not in ALLOWED_ORIGINS:
+                return JSONResponse(status_code=403, content={"error": "Cross-origin request forbidden"})
+        elif referer:
+            from urllib.parse import urlparse
+            ref_parsed = urlparse(referer)
+            ref_origin = f"{ref_parsed.scheme}://{ref_parsed.netloc}"
+            if ref_origin not in ALLOWED_ORIGINS:
+                return JSONResponse(status_code=403, content={"error": "Cross-origin request forbidden (invalid referer)"})
+        else:
+            sec_fetch_site = request.headers.get("sec-fetch-site")
+            if sec_fetch_site and sec_fetch_site not in ("same-origin", "none"):
+                return JSONResponse(status_code=403, content={"error": "Cross-site request forbidden"})
+
+    response = await call_next(request)
+    return response
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=list(ALLOWED_ORIGINS),
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -309,5 +360,5 @@ def generate_tts(req: TTSRequest):
     return Response(content=buf.read(), media_type="audio/wav")
 
 if __name__ == "__main__":
-    print("Irodori-TTS サーバーを起動します: http://localhost:5001")
-    uvicorn.run("tts_server:app", host="0.0.0.0", port=5001, reload=True)
+    print("Irodori-TTS サーバーを起動します: http://127.0.0.1:5001")
+    uvicorn.run("tts_server:app", host="127.0.0.1", port=5001, reload=True)

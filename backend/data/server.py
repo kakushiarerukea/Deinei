@@ -1,4 +1,4 @@
-import os, sys, io
+import os, sys, io, shutil
 # Windowsコンソールでの絵文字・UTF-8出力を安全に有効化 (ストリームを破棄せず再構成しC拡張クラッシュを防止)
 if hasattr(sys.stdout, 'reconfigure'):
     try:
@@ -49,30 +49,55 @@ _search_logger.addHandler(_fh)
 
 app = Flask(__name__)
 
-# ====== セキュリティ設定: 許可オリジン・ホストの厳格管理 ======
+# ====== ネットワーク・セキュリティ設定の一元管理 ======
+# 環境変数 DEINEI_PORT, LLAMA_PORT, ALLOWED_ORIGINS, DEINEI_API_KEY から動的に設定可能
+SERVER_PORT = int(os.environ.get('DEINEI_PORT', 5000))
+LLAMA_PORT = int(os.environ.get('LLAMA_PORT', 8080))
+LLAMA_SERVER_URL = os.environ.get('LLAMA_SERVER_URL', f'http://localhost:{LLAMA_PORT}')
+DEINEI_API_KEY = os.environ.get('DEINEI_API_KEY', '').strip()
+
+# ALLOWED_ORIGINS の厳格バリデーション (* や null, 空白は絶対排除)
+_raw_origins = [o.strip() for o in os.environ.get('ALLOWED_ORIGINS', '').split(',') if o.strip()]
+_safe_extra_origins = []
+for o in _raw_origins:
+    if o in ('*', 'null', 'none') or o.startswith('*') or not o.startswith(('http://', 'https://')):
+        print(f"⚠️ [Security Warning] 不正・危険なオリジン '{o}' は ALLOWED_ORIGINS から除外されました。")
+        continue
+    _safe_extra_origins.append(o)
+
 ALLOWED_ORIGINS = {
-    'http://localhost:8080',
-    'http://127.0.0.1:8080',
-    'http://localhost:5000',
-    'http://127.0.0.1:5000',
+    f'http://localhost:{LLAMA_PORT}',
+    f'http://127.0.0.1:{LLAMA_PORT}',
+    f'http://localhost:{SERVER_PORT}',
+    f'http://127.0.0.1:{SERVER_PORT}',
+    *_safe_extra_origins
 }
 
 ALLOWED_HOSTS = {
-    'localhost:5000',
-    '127.0.0.1:5000',
+    f'localhost:{SERVER_PORT}',
+    f'127.0.0.1:{SERVER_PORT}',
     'localhost',
     '127.0.0.1',
+    *[h.split('://')[-1].rstrip('/') for h in _safe_extra_origins]
 }
 
 try:
     from flask_cors import CORS
     CORS(app, resources={r"/*": {"origins": list(ALLOWED_ORIGINS)}}, expose_headers=["X-Deining-Recalled-Memories", "Content-Type"])
-    print("✅ CORS 有効化済み (ローカルUIオリジン限定)")
+    print(f"✅ CORS 有効化済み (許可オリジン: {', '.join(sorted(ALLOWED_ORIGINS))})")
 except ImportError:
     pass
 
 @app.before_request
 def security_shield():
+    # 0. APIキー認証 (DEINEI_API_KEY が設定されている場合は必須検証)
+    if DEINEI_API_KEY and request.method != 'OPTIONS':
+        auth_header = request.headers.get('Authorization', '')
+        api_key_header = request.headers.get('X-API-Key', '')
+        token = auth_header[7:] if auth_header.startswith('Bearer ') else api_key_header
+        if token != DEINEI_API_KEY:
+            return jsonify({'error': 'Unauthorized: Invalid or missing API key'}), 401
+
     # 1. DNS Rebinding 対策: Host ヘッダーの厳格検証
     host = request.host.lower() if request.host else ''
     if host not in ALLOWED_HOSTS:
@@ -82,6 +107,10 @@ def security_shield():
     if request.method not in ('GET', 'HEAD', 'OPTIONS'):
         origin = request.headers.get('Origin')
         referer = request.headers.get('Referer')
+
+        # Origin: null (sandbox iframe, data: URI, ローカル file:// 等) は無条件で 403 拒絶
+        if origin and origin.lower() in ('null', 'none'):
+            return jsonify({'error': 'Cross-origin request forbidden (null origin)'}), 403
 
         if origin:
             # ブラウザのクロスサイトリクエスト (fetch, form POST等) は必ず Origin が付与される
@@ -94,10 +123,10 @@ def security_shield():
             if ref_origin not in ALLOWED_ORIGINS:
                 return jsonify({'error': 'Cross-origin request forbidden (invalid referer)'}), 403
         else:
-            # Origin も Referer も存在しない場合 (curl等のローカルCLIツールや同一オリジン直接呼出)
+            # Origin も Referer も存在しない場合
             # Fetch Metadata (Sec-Fetch-Site) がブラウザから付与されている場合は検証
             sec_fetch_site = request.headers.get('Sec-Fetch-Site')
-            if sec_fetch_site and sec_fetch_site not in ('same-origin', 'same-site', 'none'):
+            if sec_fetch_site and sec_fetch_site not in ('same-origin', 'none'):
                 return jsonify({'error': 'Cross-site request forbidden'}), 403
 
 @app.after_request
@@ -109,9 +138,6 @@ def add_cors_headers(response):
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
         response.headers['Access-Control-Expose-Headers'] = 'X-Deining-Recalled-Memories, Content-Type'
     return response
-
-# llama-server のアドレス
-LLAMA_SERVER_URL = 'http://localhost:8080'
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 HISTORY_FILE = os.path.join(BASE_DIR, 'history.json')
@@ -160,6 +186,12 @@ try:
 except BaseException as e:
     print(f"❌ ruri-v3 のロードに失敗しました (ChromaDB デフォルトを使用します): {e}")
     ruri_ef = None
+
+def get_embed_model():
+    """エンベッディングモデル（SentenceTransformerインスタンス）を安全に取得"""
+    if ruri_ef and hasattr(ruri_ef, 'model'):
+        return ruri_ef.model
+    return None
 
 chroma_client = chromadb.PersistentClient(path=CHROMA_DB_DIR)
 def get_memory_collection(session_id=None):
@@ -438,15 +470,17 @@ def create_session():
         json.dump(session_data, f, ensure_ascii=False, indent=2)
     return jsonify(session_data)
 
-@app.route('/api/sessions/<session_id>', methods=['GET'])
+@app.route('/api/sessions/<path:session_id>', methods=['GET'])
 def get_session(session_id):
     path = get_safe_session_path(session_id)
-    if not path or not os.path.exists(path):
+    if not path:
+        return jsonify({"error": "Invalid session ID"}), 400
+    if not os.path.exists(path):
         return jsonify({"error": "not found"}), 404
     with open(path, 'r', encoding='utf-8') as f:
         return jsonify(json.load(f))
 
-@app.route('/api/sessions/<session_id>', methods=['POST'])
+@app.route('/api/sessions/<path:session_id>', methods=['POST'])
 def update_session(session_id):
     path = get_safe_session_path(session_id)
     if not path:
@@ -462,7 +496,7 @@ def update_session(session_id):
         json.dump(data, f, ensure_ascii=False, indent=2)
     return jsonify({"ok": True})
 
-@app.route('/api/sessions/<session_id>', methods=['DELETE'])
+@app.route('/api/sessions/<path:session_id>', methods=['DELETE'])
 def delete_session(session_id):
     path = get_safe_session_path(session_id)
     if not path:
@@ -786,6 +820,9 @@ def deduplicate_memories():
 
         from sentence_transformers import SentenceTransformer, util
         query_model = get_embed_model()
+        if not query_model:
+            print("⚠️ エンベッディングモデルがロードされていないため、重複統合をスキップします。")
+            return jsonify({'ok': True, 'merged': 0, 'total_remaining': len(docs), 'message': 'Embedding model not available'})
 
         merged_count = 0
         deleted_ids = set()
@@ -1391,20 +1428,54 @@ def _do_web_search(query_text):
             except Exception as ne:
                 print(f"⚠️ DuckDuckGo News検索エラー (通常検索へフォールバック): {ne}")
 
-        # 通常テキスト検索
+        # 通常テキスト検索 (多段階フォールバック: API -> HTML -> Lite -> 短縮キーワード -> Wikipedia)
         if not results:
-            try:
-                results = list(DDGS().text(clean_query, max_results=3, region='jp-jp'))
-            except Exception:
-                # 0件なら短縮キーワードでリトライ
+            for backend in ('api', 'html', 'lite'):
+                try:
+                    res = list(DDGS().text(clean_query, max_results=3, region='jp-jp', backend=backend))
+                    if res:
+                        results = res
+                        break
+                except Exception as be:
+                    _search_logger.debug(f"DDGS backend={backend} 失敗: {be}")
+                    continue
+
+            # 依然として0件なら短縮キーワードでリトライ
+            if not results:
                 words = clean_query.split()
                 if len(words) > 2:
                     short_kw = ' '.join(words[:2])
                     print(f"🔄 短縮キーワードで再試行: '{short_kw}'")
-                    try:
-                        results = list(DDGS().text(short_kw, max_results=3, region='jp-jp'))
-                    except Exception:
-                        pass
+                    for backend in ('api', 'html', 'lite'):
+                        try:
+                            res = list(DDGS().text(short_kw, max_results=3, region='jp-jp', backend=backend))
+                            if res:
+                                results = res
+                                break
+                        except Exception:
+                            continue
+
+            # 最終フォールバック: Wikipedia 日本語概要検索 (百科事典・人物・用語等の即時要約)
+            if not results:
+                try:
+                    wiki_target = clean_query.split()[0] if clean_query else ''
+                    if wiki_target:
+                        wiki_url = f"https://ja.wikipedia.org/api/rest_v1/page/summary/{wiki_target}"
+                        w_res = http_requests.get(wiki_url, timeout=3, headers={'User-Agent': 'Deinei-AI-Assistant/1.0'})
+                        if w_res.status_code == 200:
+                            w_data = w_res.json()
+                            extract = w_data.get('extract', '')
+                            w_title = w_data.get('title', wiki_target)
+                            w_page = w_data.get('content_urls', {}).get('desktop', {}).get('page', '')
+                            if extract:
+                                results.append({
+                                    'title': f"{w_title} (Wikipedia)",
+                                    'body': extract,
+                                    'href': w_page
+                                })
+                                print(f"📖 Wikipedia フォールバックから概要を取得しました: {w_title}")
+                except Exception as we:
+                    _search_logger.debug(f"Wikipedia フォールバック取得エラー: {we}")
 
         formatted = []
         for r in results:
@@ -2004,8 +2075,15 @@ def patch_live2d_model_files(folder_path, model_id):
 
 
 ALLOWED_LIVE2D_EXTENSIONS = (
+    # Live2D Cubism 定義ファイル群
     '.moc3', '.model3.json', '.cdi3.json', '.physics3.json',
-    '.pose3.json', '.exp3.json', '.motion3.json', '.png'
+    '.pose3.json', '.exp3.json', '.motion3.json', '.userdata3.json',
+    # モデル・VTube Studio設定・情報
+    '.json', '.txt',
+    # 画像アセット (テクスチャ・アバターアイコン)
+    '.png', '.jpg', '.jpeg', '.webp',
+    # モーション音声 (リップシンク・ボイス)
+    '.wav', '.mp3', '.ogg'
 )
 MAX_UNCOMPRESSED_SIZE = 150 * 1024 * 1024  # 150MB
 MAX_ZIP_ENTRIES = 300
@@ -2015,8 +2093,8 @@ def safe_copy_live2d_assets(src_dir, dst_dir):
     os.makedirs(dst_dir, exist_ok=True)
     copied_count = 0
     total_size = 0
-    MAX_COPY_FILES = 250
-    MAX_COPY_SIZE = 120 * 1024 * 1024  # 120MB
+    MAX_COPY_FILES = MAX_ZIP_ENTRIES
+    MAX_COPY_SIZE = MAX_UNCOMPRESSED_SIZE
 
     for root, dirs, files in os.walk(src_dir):
         rel_root = os.path.relpath(root, src_dir)
@@ -2032,7 +2110,7 @@ def safe_copy_live2d_assets(src_dir, dst_dir):
             copied_count += 1
             total_size += f_size
             if copied_count > MAX_COPY_FILES or total_size > MAX_COPY_SIZE:
-                raise ValueError("展開ファイル数または合計容量が安全制限を超過しました")
+                raise ValueError("展開ファイル数または合計容量が安全制限(150MB/300ファイル)を超過しました")
 
             os.makedirs(target_dir, exist_ok=True)
             shutil.copy2(src_file, os.path.join(target_dir, f))
@@ -2056,25 +2134,30 @@ def extract_live2d_zip(zip_source, custom_public_dir, static_dir=None):
         try:
             with zipfile.ZipFile(temp_zip_path) as z:
                 total_uncompressed = sum(info.file_size for info in z.infolist())
-                if total_uncompressed > MAX_UNCOMPRESSED_SIZE or len(z.infolist()) > MAX_ZIP_ENTRIES:
-                    return False, "ZIPファイルの容量またはファイル数が制限(150MB/300ファイル)を超過しています", None
+                total_entries = len(z.infolist())
+                if total_uncompressed > MAX_UNCOMPRESSED_SIZE or total_entries > MAX_ZIP_ENTRIES:
+                    return False, f"ZIPファイルの容量またはファイル数が制限(150MB/300ファイル)を超過しています (解凍サイズ: {total_uncompressed / (1024*1024):.1f}MB, ファイル数: {total_entries})", None
                 z.extractall(td)
         except Exception as e:
             return False, f"ZIPファイルの解凍に失敗しました: {e}", None
 
-        # 2. ネストされたZIPファイルの解凍 (BOOTH二重ZIP対応: 最大1段のみ許可)
+        # 2. ネストされたZIPファイルの解凍 (BOOTH二重ZIP対応: ネスト分も容量・ファイル数に合算計上)
         nested_zips = glob.glob(os.path.join(td, '**', '*.zip'), recursive=True)
         if nested_zips:
-            for nz in nested_zips[:3]:
-                nz_dir = os.path.splitext(nz)[0]
-                os.makedirs(nz_dir, exist_ok=True)
+            for nz in nested_zips:
                 try:
                     with zipfile.ZipFile(nz) as z2:
-                        n_uncompressed = sum(info.file_size for info in z2.infolist())
-                        if n_uncompressed <= MAX_UNCOMPRESSED_SIZE and len(z2.infolist()) <= MAX_ZIP_ENTRIES:
-                            z2.extractall(nz_dir)
-                except Exception:
-                    pass
+                        nz_uncompressed = sum(info.file_size for info in z2.infolist())
+                        nz_entries = len(z2.infolist())
+                        total_uncompressed += nz_uncompressed
+                        total_entries += nz_entries
+                        if total_uncompressed > MAX_UNCOMPRESSED_SIZE or total_entries > MAX_ZIP_ENTRIES:
+                            return False, f"ネストされたZIPを含めた容量またはファイル数が制限(150MB/300ファイル)を超過しています (合計サイズ: {total_uncompressed / (1024*1024):.1f}MB, 合計ファイル数: {total_entries})", None
+                        nz_dir = os.path.splitext(nz)[0]
+                        os.makedirs(nz_dir, exist_ok=True)
+                        z2.extractall(nz_dir)
+                except Exception as e:
+                    return False, f"ネストされたZIPの解凍に失敗しました: {e}", None
                 try:
                     os.remove(nz)
                 except Exception:
