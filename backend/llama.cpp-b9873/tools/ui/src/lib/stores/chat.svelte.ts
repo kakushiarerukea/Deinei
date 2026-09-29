@@ -3335,10 +3335,7 @@ class ChatStore {
 						});
 						if (res.ok) { cleared = true; break; }
 					} catch (e) {
-						try {
-							const res2 = await fetch(`http://${h}:5000/memory/clear?session_id=${convId}`, { method: 'GET' });
-							if (res2.ok) { cleared = true; break; }
-						} catch (e2) {}
+						// ignore connection errors to retry next host
 					}
 				}
 				if (cleared) {

@@ -49,22 +49,66 @@ _search_logger.addHandler(_fh)
 
 app = Flask(__name__)
 
-# ====== 泥濘統合: CORS対応 ======
+# ====== セキュリティ設定: 許可オリジン・ホストの厳格管理 ======
+ALLOWED_ORIGINS = {
+    'http://localhost:8080',
+    'http://127.0.0.1:8080',
+    'http://localhost:5000',
+    'http://127.0.0.1:5000',
+}
+
+ALLOWED_HOSTS = {
+    'localhost:5000',
+    '127.0.0.1:5000',
+    'localhost',
+    '127.0.0.1',
+}
+
 try:
     from flask_cors import CORS
-    CORS(app, resources={r"/*": {"origins": "*"}}, expose_headers=["*", "X-Deining-Recalled-Memories", "Content-Type"])
-    print("✅ CORS 有効化済み (Expose-Headers 設定完了)")
+    CORS(app, resources={r"/*": {"origins": list(ALLOWED_ORIGINS)}}, expose_headers=["X-Deining-Recalled-Memories", "Content-Type"])
+    print("✅ CORS 有効化済み (ローカルUIオリジン限定)")
 except ImportError:
     pass
 
+@app.before_request
+def security_shield():
+    # 1. DNS Rebinding 対策: Host ヘッダーの厳格検証
+    host = request.host.lower() if request.host else ''
+    if host not in ALLOWED_HOSTS:
+        return jsonify({'error': 'Invalid Host header'}), 400
+
+    # 2. CSRF 対策: 状態変更メソッド (非GET/HEAD/OPTIONS) に対する Origin / Referer 検査
+    if request.method not in ('GET', 'HEAD', 'OPTIONS'):
+        origin = request.headers.get('Origin')
+        referer = request.headers.get('Referer')
+
+        if origin:
+            # ブラウザのクロスサイトリクエスト (fetch, form POST等) は必ず Origin が付与される
+            if origin.rstrip('/') not in ALLOWED_ORIGINS:
+                return jsonify({'error': 'Cross-origin request forbidden'}), 403
+        elif referer:
+            from urllib.parse import urlparse
+            ref_parsed = urlparse(referer)
+            ref_origin = f"{ref_parsed.scheme}://{ref_parsed.netloc}"
+            if ref_origin not in ALLOWED_ORIGINS:
+                return jsonify({'error': 'Cross-origin request forbidden (invalid referer)'}), 403
+        else:
+            # Origin も Referer も存在しない場合 (curl等のローカルCLIツールや同一オリジン直接呼出)
+            # Fetch Metadata (Sec-Fetch-Site) がブラウザから付与されている場合は検証
+            sec_fetch_site = request.headers.get('Sec-Fetch-Site')
+            if sec_fetch_site and sec_fetch_site not in ('same-origin', 'same-site', 'none'):
+                return jsonify({'error': 'Cross-site request forbidden'}), 403
+
 @app.after_request
 def add_cors_headers(response):
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-    response.headers['Access-Control-Allow-Headers'] = '*'
-    response.headers['Access-Control-Expose-Headers'] = '*, X-Deining-Recalled-Memories'
+    req_origin = request.headers.get('Origin')
+    if req_origin and req_origin.rstrip('/') in ALLOWED_ORIGINS:
+        response.headers['Access-Control-Allow-Origin'] = req_origin
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+        response.headers['Access-Control-Expose-Headers'] = 'X-Deining-Recalled-Memories, Content-Type'
     return response
-    print("✅ CORS 手動ヘッダー有効化済み")
 
 # llama-server のアドレス
 LLAMA_SERVER_URL = 'http://localhost:8080'
@@ -286,17 +330,28 @@ def _search_ephemeral_web_for_proxy(query_text, n_results=2):
 def health_check():
     return jsonify({'status': 'ok', 'service': 'deining-proxy'})
 
-# favicon, 画像など静的ファイルも配信
-@app.route('/<path:filename>')
-def static_files(filename):
-    # /memory パスが静的ファイルとして処理されないようにガード
-    if filename.startswith('memory'):
-        return jsonify({'error': 'not found'}), 404
-    return send_from_directory(BASE_DIR, filename)
-
 CHATS_DIR = os.path.join(BASE_DIR, 'chats')
 if not os.path.exists(CHATS_DIR):
     os.makedirs(CHATS_DIR)
+
+def is_safe_session_id(session_id: str) -> bool:
+    """セッションIDが安全な形式（英数字、ハイフン、アンダースコアのみ、1〜64文字）かを判定"""
+    if not session_id or not isinstance(session_id, str):
+        return False
+    return bool(re.match(r'^[a-zA-Z0-9_-]{1,64}$', session_id))
+
+def get_safe_session_path(session_id: str) -> str | None:
+    """パストラバーサルを完全に遮断し、CHATS_DIR配下の絶対パスのみを返す"""
+    if not is_safe_session_id(session_id):
+        return None
+    chats_abs = os.path.abspath(CHATS_DIR)
+    target_path = os.path.abspath(os.path.join(chats_abs, f"{session_id}.json"))
+    try:
+        if os.path.commonpath([chats_abs, target_path]) != chats_abs:
+            return None
+    except ValueError:
+        return None
+    return target_path
 
 # ====== 既存履歴のマイグレーション ======
 def migrate_legacy_history():
@@ -362,8 +417,12 @@ def get_sessions():
 
 @app.route('/api/sessions', methods=['POST'])
 def create_session():
-    data = request.get_json() or {}
-    session_id = data.get('id', str(uuid.uuid4()))
+    data = request.get_json(silent=True) or {}
+    session_id = data.get('id') or str(uuid.uuid4())
+    path = get_safe_session_path(session_id)
+    if not path:
+        return jsonify({'error': 'Invalid session ID'}), 400
+
     from datetime import datetime
     session_data = {
         "id": session_id,
@@ -375,35 +434,39 @@ def create_session():
         "aiHistoryText": "",
         "lastSummarizedIndex": 0
     }
-    path = os.path.join(CHATS_DIR, f"{session_id}.json")
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(session_data, f, ensure_ascii=False, indent=2)
     return jsonify(session_data)
 
 @app.route('/api/sessions/<session_id>', methods=['GET'])
 def get_session(session_id):
-    path = os.path.join(CHATS_DIR, f"{session_id}.json")
-    if os.path.exists(path):
-        with open(path, 'r', encoding='utf-8') as f:
-            return jsonify(json.load(f))
-    return jsonify({"error": "not found"}), 404
+    path = get_safe_session_path(session_id)
+    if not path or not os.path.exists(path):
+        return jsonify({"error": "not found"}), 404
+    with open(path, 'r', encoding='utf-8') as f:
+        return jsonify(json.load(f))
 
 @app.route('/api/sessions/<session_id>', methods=['POST'])
 def update_session(session_id):
-    data = request.get_json()
+    path = get_safe_session_path(session_id)
+    if not path:
+        return jsonify({"error": "Invalid session ID"}), 400
+    data = request.get_json(silent=True)
+    if not data or not isinstance(data, dict):
+        return jsonify({"error": "Invalid JSON"}), 400
     from datetime import datetime
     data['updatedAt'] = datetime.now().isoformat()
-    # name がない場合は更新しないように保持するか、デフォルトを設定
     if 'name' not in data:
         data['name'] = 'チャット'
-    path = os.path.join(CHATS_DIR, f"{session_id}.json")
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     return jsonify({"ok": True})
 
 @app.route('/api/sessions/<session_id>', methods=['DELETE'])
 def delete_session(session_id):
-    path = os.path.join(CHATS_DIR, f"{session_id}.json")
+    path = get_safe_session_path(session_id)
+    if not path:
+        return jsonify({"error": "Invalid session ID"}), 400
     if os.path.exists(path):
         os.remove(path)
     # ChromaDBのコレクションも削除
@@ -682,21 +745,23 @@ def search_memory():
     print(f"🔍 記憶検索: \"{query[:30]}...\" → {len(filtered)} 件ヒット (元候補: {len(memories)}件)")
     return jsonify({'memories': filtered})
 
-@app.route('/memory', methods=['GET', 'POST', 'DELETE', 'OPTIONS'])
-@app.route('/memory/clear', methods=['GET', 'POST', 'DELETE', 'OPTIONS'])
+@app.route('/memory', methods=['POST', 'DELETE', 'OPTIONS'])
+@app.route('/memory/clear', methods=['POST', 'DELETE', 'OPTIONS'])
 def delete_memory():
     """WebUI用の長期記憶を削除する。"""
     if request.method == 'OPTIONS':
         return '', 204
     try:
-        collection = get_memory_collection()
+        data = request.get_json(silent=True) or {}
+        session_id = data.get('session_id') or request.args.get('session_id')
+        collection = get_memory_collection(session_id)
         collection.delete(where={"channel_id": "web_ui"})
-        print("🗑️ 長期記憶（Web UI分）を削除しました")
+        print(f"🗑️ 長期記憶（Web UI分 session={session_id}）を削除しました")
     except Exception as e:
         print(f"⚠️ 記憶の削除中にエラー: {e}")
     return jsonify({'ok': True})
 
-@app.route('/memory/deduplicate', methods=['POST', 'GET', 'OPTIONS'])
+@app.route('/memory/deduplicate', methods=['POST', 'OPTIONS'])
 def deduplicate_memories():
     """既存の全記憶の中でコサイン類似度が著しく高いもの同士を一括統合し、ゴミを排除する。"""
     if request.method == 'OPTIONS':
@@ -1938,10 +2003,43 @@ def patch_live2d_model_files(folder_path, model_id):
                 print(f"[Deining Live2D Patch] silver model3.json patch failed: {e}")
 
 
+ALLOWED_LIVE2D_EXTENSIONS = (
+    '.moc3', '.model3.json', '.cdi3.json', '.physics3.json',
+    '.pose3.json', '.exp3.json', '.motion3.json', '.png'
+)
+MAX_UNCOMPRESSED_SIZE = 150 * 1024 * 1024  # 150MB
+MAX_ZIP_ENTRIES = 300
+
+def safe_copy_live2d_assets(src_dir, dst_dir):
+    """ホワイトリストに登録された安全なLive2Dアセットのみをコピー（スクリプト・実行ファイル混入を完全防止）"""
+    os.makedirs(dst_dir, exist_ok=True)
+    copied_count = 0
+    total_size = 0
+    MAX_COPY_FILES = 250
+    MAX_COPY_SIZE = 120 * 1024 * 1024  # 120MB
+
+    for root, dirs, files in os.walk(src_dir):
+        rel_root = os.path.relpath(root, src_dir)
+        target_dir = os.path.join(dst_dir, rel_root) if rel_root != '.' else dst_dir
+        for f in files:
+            lower_name = f.lower()
+            if not any(lower_name.endswith(ext) for ext in ALLOWED_LIVE2D_EXTENSIONS):
+                print(f"⚠️ [Security] 非許可拡張子のためスキップ: {f}")
+                continue
+
+            src_file = os.path.join(root, f)
+            f_size = os.path.getsize(src_file)
+            copied_count += 1
+            total_size += f_size
+            if copied_count > MAX_COPY_FILES or total_size > MAX_COPY_SIZE:
+                raise ValueError("展開ファイル数または合計容量が安全制限を超過しました")
+
+            os.makedirs(target_dir, exist_ok=True)
+            shutil.copy2(src_file, os.path.join(target_dir, f))
+
 def extract_live2d_zip(zip_source, custom_public_dir, static_dir=None):
-    """ZIPファイル（ファイルオブジェクトまたはパス）を再帰解凍し、
-    .model3.json を探索して custom_public および static ディレクトリへ自動配置する。
-    BOOTH等の二重ZIPや深層ネストも完全走査する。
+    """ZIPファイル（ファイルオブジェクト）を安全に解凍し、
+    .model3.json を探索してホワイトリストアセットのみを custom_public および static ディレクトリへ配置する。
     """
     import zipfile, tempfile, shutil, glob
 
@@ -1951,31 +2049,30 @@ def extract_live2d_zip(zip_source, custom_public_dir, static_dir=None):
             zip_source.seek(0)
             with open(temp_zip_path, 'wb') as f:
                 shutil.copyfileobj(zip_source, f)
-        elif isinstance(zip_source, str) and os.path.exists(zip_source):
-            shutil.copy2(zip_source, temp_zip_path)
         else:
-            return False, "無効なZIPソースです", None
+            return False, "無効なアップロードソースです", None
 
-        # 1. 最初の解凍
+        # 1. 最初の解凍（ZipBombサイズチェック付き）
         try:
             with zipfile.ZipFile(temp_zip_path) as z:
+                total_uncompressed = sum(info.file_size for info in z.infolist())
+                if total_uncompressed > MAX_UNCOMPRESSED_SIZE or len(z.infolist()) > MAX_ZIP_ENTRIES:
+                    return False, "ZIPファイルの容量またはファイル数が制限(150MB/300ファイル)を超過しています", None
                 z.extractall(td)
         except Exception as e:
             return False, f"ZIPファイルの解凍に失敗しました: {e}", None
 
-        # 2. ネストされたZIPファイルの再帰解凍 (BOOTH二重ZIP対応)
-        nested_loop_guard = 0
-        while nested_loop_guard < 5:
-            nested_loop_guard += 1
-            nested_zips = glob.glob(os.path.join(td, '**', '*.zip'), recursive=True)
-            if not nested_zips:
-                break
-            for nz in nested_zips:
+        # 2. ネストされたZIPファイルの解凍 (BOOTH二重ZIP対応: 最大1段のみ許可)
+        nested_zips = glob.glob(os.path.join(td, '**', '*.zip'), recursive=True)
+        if nested_zips:
+            for nz in nested_zips[:3]:
                 nz_dir = os.path.splitext(nz)[0]
                 os.makedirs(nz_dir, exist_ok=True)
                 try:
                     with zipfile.ZipFile(nz) as z2:
-                        z2.extractall(nz_dir)
+                        n_uncompressed = sum(info.file_size for info in z2.infolist())
+                        if n_uncompressed <= MAX_UNCOMPRESSED_SIZE and len(z2.infolist()) <= MAX_ZIP_ENTRIES:
+                            z2.extractall(nz_dir)
                 except Exception:
                     pass
                 try:
@@ -2018,18 +2115,22 @@ def extract_live2d_zip(zip_source, custom_public_dir, static_dir=None):
         else:
             return False, "対応外のモデルです。本システムでは「銀髪の女の子 (ulvm2)」または「茶髪の癒し系お姉さん (fav_usaneko)」の専用Live2Dモデルのみ配置可能です。", None
 
-        # 配置先: custom_public/deining/<dest_folder_name> (1箇所に統一配置)
+        # 配置先: custom_public/deining/<dest_folder_name> (安全な拡張子ホワイトリストコピー)
         target_root_dir = os.path.join(custom_public_dir, 'deining', dest_folder_name)
-        os.makedirs(target_root_dir, exist_ok=True)
-        shutil.copytree(model_source_dir, target_root_dir, dirs_exist_ok=True)
-        patch_live2d_model_files(target_root_dir, model_id)
+        try:
+            safe_copy_live2d_assets(model_source_dir, target_root_dir)
+            patch_live2d_model_files(target_root_dir, model_id)
+        except Exception as e:
+            return False, f"アセット配置中にエラーが発生しました: {e}", None
 
         # 配置先2: static ディレクトリ (存在する場合同期)
         if static_dir and os.path.isdir(static_dir):
             target_static_dir = os.path.join(static_dir, dest_folder_name)
-            os.makedirs(target_static_dir, exist_ok=True)
-            shutil.copytree(model_source_dir, target_static_dir, dirs_exist_ok=True)
-            patch_live2d_model_files(target_static_dir, model_id)
+            try:
+                safe_copy_live2d_assets(model_source_dir, target_static_dir)
+                patch_live2d_model_files(target_static_dir, model_id)
+            except Exception:
+                pass
 
         rel_url = f"/deining/{dest_folder_name}/{model3_filename}"
         print(f"🌸 Live2Dモデル配置成功: {model_name} -> {rel_url}")
@@ -2098,14 +2199,13 @@ def get_avatar_models():
 
 @app.route('/api/avatar/upload', methods=['POST'])
 def upload_avatar_model():
-    """Live2DモデルのZIPファイルを受け取り、自動解凍・配置するAPI"""
+    """Live2DモデルのZIPファイルを受け取り、自動解凍・配置するAPI（マルチパートファイルのみ受付）"""
     custom_public_dir = os.path.abspath(os.path.join(BASE_DIR, '..', '..', 'llama-b9873-bin-win-cuda-13.3-x64sandbox', 'custom_public'))
     static_dir = os.path.abspath(os.path.join(BASE_DIR, '..', 'llama.cpp-b9873', 'tools', 'ui', 'static', 'deining'))
 
-    # 1. マルチパートファイルアップロード
     if 'file' in request.files:
         file_obj = request.files['file']
-        if file_obj.filename == '':
+        if not file_obj or file_obj.filename == '':
             return jsonify({'error': 'ファイルが選択されていません'}), 400
         success, msg, model_info = extract_live2d_zip(file_obj, custom_public_dir, static_dir)
         if not success:
@@ -2117,31 +2217,19 @@ def upload_avatar_model():
             'models': get_all_avatar_models_data()
         })
 
-    # 2. ローカルパス指定（自動インポートやテスト用）
-    elif request.is_json and 'path' in request.json:
-        local_path = request.json['path']
-        success, msg, model_info = extract_live2d_zip(local_path, custom_public_dir, static_dir)
-        if not success:
-            return jsonify({'error': msg}), 400
-        return jsonify({
-            'success': True,
-            'message': msg,
-            'model': model_info,
-            'models': get_all_avatar_models_data()
-        })
-
-    return jsonify({'error': '有効なファイルまたはパスが指定されていません'}), 400
+    return jsonify({'error': '有効なZIPファイルがアップロードされていません'}), 400
 
 
 if __name__ == '__main__':
     print('================================================================')
-    print('🚀 泥濘(でいねい) プロキシサーバー起動中: http://localhost:5000')
+    print('🚀 泥濘(でいねい) プロキシサーバー起動中: http://127.0.0.1:5000')
     print('   → LLM推論サーバー (ポート8080) へプロキシします')
     print('   → RAG (ChromaDB) / Web検索 を自動注入します')
     print('   → STT (ReazonSpeech-K2) を遅延起動モード（初回入力時にロード）で待機中')
+    print('   → [Security] Host検査 & CSRF検査 有効 (127.0.0.1 バインド)')
     print('================================================================')
     try:
-        app.run(host='0.0.0.0', port=5000, threaded=True)
+        app.run(host='127.0.0.1', port=5000, threaded=True)
     except OSError as e:
         if getattr(e, 'winerror', None) == 10048 or 'address already in use' in str(e).lower():
             print("\n❌ [ポート競合エラー] ポート 5000 が既に他のプロセスで使用されています！")
