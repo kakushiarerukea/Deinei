@@ -1,0 +1,1 @@
+ブラウザ側のIndexedDBに会話ツリー、アーカイブ済み要約（archivedSummaries）、想起記憶（recalledMemories）を保存。

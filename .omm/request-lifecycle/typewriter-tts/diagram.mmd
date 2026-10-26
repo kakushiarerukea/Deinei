@@ -1,0 +1,13 @@
+graph LR
+    llm-done["LLM生成完了通知\n段落テキストのパース"]
+    filter-narration["ト書き・地の文分離\n*斜体* や (心の声) を検出"]
+    instant-reveal["ト書き即時開示\n音声待機なしで全文表示"]
+    tts-synthesize["TTS音声合成 (5001)\nIrodori-TTS WAVストリーミング"]
+    web-audio["Web Audio API\nAnalyserNode (FFT 256)"]
+    typewriter-anim["タイプライター表示\n15 TPS (1秒15文字) アニメ"]
+
+    llm-done -->|段落分類| filter-narration
+    filter-narration -->|非発話テキスト| instant-reveal
+    filter-narration -->|発話セリフ| tts-synthesize
+    tts-synthesize -->|波形解析| web-audio
+    tts-synthesize -->|音声進行同期| typewriter-anim

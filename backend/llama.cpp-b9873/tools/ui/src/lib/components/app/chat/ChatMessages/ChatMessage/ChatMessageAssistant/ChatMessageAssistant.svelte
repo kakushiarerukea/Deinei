@@ -1,0 +1,1007 @@
+<script lang="ts">
+	import {
+		ChatMessageAgenticContent,
+		ChatMessageActionIcons,
+		ChatMessageEditForm,
+		ChatMessageStatistics,
+		ModelBadge,
+		ModelsSelectorDropdown
+	} from '$lib/components/app';
+	import { getMessageEditContext } from '$lib/contexts';
+	import { useProcessingState } from '$lib/hooks/use-processing-state.svelte';
+	import { isLoading, isChatStreaming, isMessageAborted } from '$lib/stores/chat.svelte';
+	import { copyToClipboard, deriveAgenticSections, modelLoadProgressText } from '$lib/utils';
+	import { AgenticSectionType } from '$lib/enums';
+	import { REASONING_TAGS } from '$lib/constants/agentic';
+	import { tick } from 'svelte';
+	import { fade } from 'svelte/transition';
+	import { MessageRole, ChatMessageStatsView } from '$lib/enums';
+	import { config } from '$lib/stores/settings.svelte';
+	import { isRouterMode } from '$lib/stores/server.svelte';
+	import { modelsStore } from '$lib/stores/models.svelte';
+	import { ttsStore } from '$lib/stores/tts.svelte';
+	import { ServerModelStatus } from '$lib/enums';
+	import ChatMessageRecalledMemories from './ChatMessageRecalledMemories.svelte';
+	import { t } from '$lib/stores/i18n.svelte';
+
+	import { hasAgenticContent } from '$lib/utils';
+
+	interface Props {
+		class?: string;
+		deletionInfo: {
+			totalCount: number;
+			userMessages: number;
+			assistantMessages: number;
+			messageTypes: string[];
+		} | null;
+		isLastAssistantMessage?: boolean;
+		message: DatabaseMessage;
+		toolMessages?: DatabaseMessage[];
+		messageContent: string | undefined;
+		onCopy: () => void;
+		onConfirmDelete: () => void;
+		onContinue?: () => void;
+		onDelete: () => void;
+		onEdit?: () => void;
+		onForkConversation?: (options: { name: string; includeAttachments: boolean }) => void;
+		onNavigateToSibling?: (siblingId: string) => void;
+		onRegenerate: (modelOverride?: string) => void;
+		onShowDeleteDialogChange: (show: boolean) => void;
+		showDeleteDialog: boolean;
+		siblingInfo?: ChatMessageSiblingInfo | null;
+		textareaElement?: HTMLTextAreaElement;
+	}
+
+	let {
+		class: className = '',
+		deletionInfo,
+		isLastAssistantMessage = false,
+		message,
+		toolMessages = [],
+		messageContent,
+		onConfirmDelete,
+		onContinue,
+		onCopy,
+		onDelete,
+		onEdit,
+		onForkConversation,
+		onNavigateToSibling,
+		onRegenerate,
+		onShowDeleteDialogChange,
+		showDeleteDialog,
+		siblingInfo = null,
+		textareaElement = $bindable()
+	}: Props = $props();
+
+	// Get edit context
+	const editCtx = getMessageEditContext();
+
+	const isAgentic = $derived(hasAgenticContent(message, toolMessages));
+	const processingState = useProcessingState();
+
+	let currentConfig = $derived(config());
+	let isRouter = $derived(isRouterMode());
+	let showRawOutput = $state(false);
+	let isRawTextMode = $derived(!!currentConfig.showRawPlainText);
+
+	let rawOutputContent = $derived.by(() => {
+		if (!showRawOutput) return '';
+		const sections = deriveAgenticSections(message, toolMessages, [], false);
+		const parts: string[] = [];
+
+		for (const section of sections) {
+			switch (section.type) {
+				case AgenticSectionType.REASONING:
+				case AgenticSectionType.REASONING_PENDING:
+					parts.push(`${REASONING_TAGS.START}\n${section.content}\n${REASONING_TAGS.END}`);
+					break;
+
+				case AgenticSectionType.TEXT:
+					parts.push(section.content);
+					break;
+
+				case AgenticSectionType.TOOL_CALL:
+				case AgenticSectionType.TOOL_CALL_PENDING:
+				case AgenticSectionType.TOOL_CALL_STREAMING: {
+					const callObj: Record<string, unknown> = { name: section.toolName };
+
+					if (section.toolArgs) {
+						try {
+							callObj.arguments = JSON.parse(section.toolArgs);
+						} catch {
+							callObj.arguments = section.toolArgs;
+						}
+					}
+
+					parts.push(JSON.stringify(callObj, null, 2));
+
+					if (section.toolResult) {
+						parts.push(`[Tool Result]\n${section.toolResult}`);
+					}
+
+					break;
+				}
+			}
+		}
+
+		return parts.join('\n\n\n');
+	});
+
+	let activeStatsView = $state<ChatMessageStatsView>(ChatMessageStatsView.GENERATION);
+	let statsContainerEl: HTMLDivElement | undefined = $state();
+
+	function getScrollParent(el: HTMLElement): HTMLElement | null {
+		let parent = el.parentElement;
+		while (parent) {
+			const style = getComputedStyle(parent);
+			if (/(auto|scroll)/.test(style.overflowY)) {
+				return parent;
+			}
+			parent = parent.parentElement;
+		}
+		return null;
+	}
+
+	async function handleStatsViewChange(view: ChatMessageStatsView) {
+		const el = statsContainerEl;
+		if (!el) {
+			activeStatsView = view;
+
+			return;
+		}
+
+		const scrollParent = getScrollParent(el);
+		if (!scrollParent) {
+			activeStatsView = view;
+
+			return;
+		}
+
+		const yBefore = el.getBoundingClientRect().top;
+
+		activeStatsView = view;
+
+		await tick();
+
+		const delta = el.getBoundingClientRect().top - yBefore;
+		if (delta !== 0) {
+			scrollParent.scrollTop += delta;
+		}
+
+		// Correct any drift after browser paint
+		requestAnimationFrame(() => {
+			const drift = el.getBoundingClientRect().top - yBefore;
+
+			if (Math.abs(drift) > 1) {
+				scrollParent.scrollTop += drift;
+			}
+		});
+	}
+
+	let highlightAgenticTurns = $derived(
+		isAgentic &&
+			(currentConfig.alwaysShowAgenticTurns || activeStatsView === ChatMessageStatsView.SUMMARY)
+	);
+
+	let displayedModel = $derived(message.model ?? null);
+
+	// model being switched to while it loads, so the selector bar tracks it
+	let pendingModel = $state<string | null>(null);
+
+	let isCurrentlyLoading = $derived(isLoading());
+	let isStreaming = $derived(isChatStreaming());
+	let localAborted = $state(false);
+	let isAborted = $derived(
+		localAborted ||
+		Boolean(message?.isAborted) ||
+		(message?.id ? isMessageAborted(message.id) : false)
+	);
+	let hasNoContent = $derived(!message?.content?.trim());
+	let isActivelyProcessing = $derived(isCurrentlyLoading || isStreaming);
+
+	// during a router auto-load the message has no model yet, so target the selected one
+	let loadTargetModel = $derived(message.model ?? modelsStore.selectedModelName);
+	let modelLoadProgress = $derived(
+		isRouter && loadTargetModel ? modelsStore.getLoadProgress(loadTargetModel) : null
+	);
+	let modelLoadingText = $derived(modelLoadProgressText(modelLoadProgress));
+
+	let showProcessingInfoTop = $derived(
+		message?.role === MessageRole.ASSISTANT &&
+			isActivelyProcessing &&
+			hasNoContent &&
+			!isAgentic &&
+			isLastAssistantMessage
+	);
+
+	let showProcessingInfoBottom = $derived(
+		message?.role === MessageRole.ASSISTANT &&
+			isActivelyProcessing &&
+			(!hasNoContent || isAgentic) &&
+			isLastAssistantMessage
+	);
+
+	let assistantEl: HTMLDivElement | undefined = $state();
+	let lastUserMessageHeight = $state(0);
+	let assistantMarginTop = $state(0);
+
+	$effect(() => {
+		if (!assistantEl || !isLastAssistantMessage) {
+			lastUserMessageHeight = 0;
+			return;
+		}
+
+		assistantMarginTop = Math.round(parseFloat(getComputedStyle(assistantEl).marginTop));
+
+		const chatMessageEl = assistantEl.closest('.chat-message');
+		const previousChatMessage = chatMessageEl?.previousElementSibling;
+		const userMessageEl = previousChatMessage?.querySelector(
+			'.chat-message-user'
+		) as HTMLElement | null;
+
+		if (!userMessageEl) {
+			lastUserMessageHeight = 0;
+			return;
+		}
+
+		const updateHeight = () => {
+			const rect = userMessageEl.getBoundingClientRect();
+			const marginTop = Math.round(parseFloat(getComputedStyle(userMessageEl).marginTop));
+			lastUserMessageHeight = Math.round(rect.height + marginTop);
+		};
+
+		updateHeight();
+
+		const resizeObserver = new ResizeObserver(updateHeight);
+		resizeObserver.observe(userMessageEl);
+
+		return () => {
+			resizeObserver.disconnect();
+		};
+	});
+
+	function handleCopyModel() {
+		void copyToClipboard(displayedModel ?? '');
+	}
+
+	$effect(() => {
+		if (showProcessingInfoTop || showProcessingInfoBottom) {
+			processingState.startMonitoring();
+		}
+	});
+
+	let isAudioPlaying = $state(false);
+	let isAudioSequenceActive = $state(false);
+	let isSyncDisplayActive = $state(false);
+	let currentSegmentIndex = $state(0);
+	let isSyncWaiting = $state(false);
+	let wasStreaming = $state(false);
+	let sequenceId = $state(0);
+
+	// タイプライター表示アニメーション用ステート
+	let typewriterCharCount = $state<number | null>(null);
+	let lastAnimatedIdx = -1;
+	let typewriterTimer: any = null;
+	let naturalAdvanceTimer: any = null;
+
+	$effect(() => {
+		if (typeof window !== 'undefined') {
+			(window as any).isDeiningAudioSequenceActive = isAudioSequenceActive;
+		}
+	});
+
+	function cleanTextForTTS(rawText: string): string {
+		if (!rawText) return '';
+		let text = rawText;
+		// 1. <think>思考タグの完全除去
+		text = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+		// 2. コードブロックの除去
+		text = text.replace(/```[\s\S]*?```/g, '');
+		text = text.replace(/`([^`]+)`/g, '$1');
+		// 3. Markdown見出し記号 (### 見出し -> 見出し)
+		text = text.replace(/^#{1,6}\s+/gm, '');
+		// 4. Markdown箇条書き・番号付きリスト記号 (- 項目, * 項目, 1. 項目 -> 項目)
+		text = text.replace(/^[\s]*[-*+]\s+/gm, '');
+		text = text.replace(/^[\s]*\d+\.\s+/gm, '');
+		// 5. Markdown太字・斜体の展開（**文字** -> 文字 をト書き判定前に実行）
+		text = text.replace(/\*\*\*([^*]+)\*\*\*/g, '$1');
+		text = text.replace(/\*\*([^*]+)\*\*/g, '$1');
+		text = text.replace(/___([^_]+)___/g, '$1');
+		text = text.replace(/__([^_]+)__/g, '$1');
+		// 6. Markdownリンク [テキスト](URL) -> テキスト
+		text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+		// 7. ト書き（アスタリスクで囲まれた動作描写）の除去 (改行跨ぎ対応)
+		text = text.replace(/＊+([\s\S]*?)＊+/g, '');
+		text = text.replace(/\*+([\s\S]*?)\*+/g, '');
+		// 8. 動作描写・補足・感情表現を表す丸カッコ内のテキストを無条件に除外（TTS音読完全防止）
+		text = text.replace(/（[\s\S]*?）/g, '');
+		text = text.replace(/\([\s\S]*?\)/g, '');
+		// 9. 不要な記号の整理 & 孤立アスタリスクの除去 (TTS誤読完全防止)
+		text = text.replace(/^[>|]\s*/gm, '');
+		text = text.replace(/[*＊]/g, '');
+		// 10. 絵文字・装飾記号・異体字セレクタ等の除去 (TTSへの絵文字送信防止)
+		text = text.replace(
+			/[\p{Extended_Pictographic}\p{Emoji_Presentation}\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B50}\u{2B55}\u{203C}\u{2049}\u{FE00}-\u{FE0F}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]+/gu,
+			''
+		);
+		text = text.replace(/「\s*」|『\s*』|“\s*”|"\s*"/g, '');
+		return text.trim();
+	}
+
+	function splitIntoSmartSegments(raw: string) {
+		if (!raw || !raw.trim()) return [];
+
+		// 1. <think> 思考ブロックを完全除去
+		const cleanRaw = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+		if (!cleanRaw) return [];
+
+		// 2. 改行を跨ぐ情景描写（*...* や ＊...＊）をトークナイズして分離
+		const blockRegex = /(\*[^*]+?\*|＊[^＊]+?＊)/g;
+		const tokens: { text: string; isTogaki: boolean }[] = [];
+		let lastIndex = 0;
+		let match: RegExpExecArray | null;
+
+		while ((match = blockRegex.exec(cleanRaw)) !== null) {
+			if (match.index > lastIndex) {
+				const before = cleanRaw.slice(lastIndex, match.index);
+				if (before.trim()) {
+					tokens.push({ text: before, isTogaki: false });
+				}
+			}
+			tokens.push({ text: match[0], isTogaki: true });
+			lastIndex = match.index + match[0].length;
+		}
+
+		if (lastIndex < cleanRaw.length) {
+			const after = cleanRaw.slice(lastIndex);
+			if (after.trim()) {
+				tokens.push({ text: after, isTogaki: false });
+			}
+		}
+
+		// 3. 各トークンをセグメント化
+		const rawSegments: { text: string; clean: string; isSpeech: boolean }[] = [];
+
+		for (const token of tokens) {
+			if (token.isTogaki) {
+				// 改行を含む情景描写ブロック全体を1つの非発話セグメントとして登録
+				rawSegments.push({
+					text: token.text.trim(),
+					clean: '',
+					isSpeech: false
+				});
+			} else {
+				// セリフ部分：改行単位で分割してセグメント化
+				const lines = token.text.split(/\n+/).map((l) => l.trim()).filter((l) => l.length > 0);
+				for (const line of lines) {
+					// 単独カッコによるト書き（例: "（微笑む）"）の判定
+					const isParenTogaki = /^（[^\n]+）$|^\([^\n]+\)$/.test(line);
+					if (isParenTogaki) {
+						rawSegments.push({
+							text: line,
+							clean: '',
+							isSpeech: false
+						});
+					} else {
+						const clean = cleanTextForTTS(line);
+						rawSegments.push({
+							text: line,
+							clean: clean,
+							isSpeech: clean.length > 0
+						});
+					}
+				}
+			}
+		}
+
+		return rawSegments.map((s, idx) => ({
+			id: idx,
+			rawText: s.text,
+			speakableText: s.clean,
+			isSpeech: s.isSpeech
+		}));
+	}
+
+	let segments = $derived.by(() => {
+		if (!isLastAssistantMessage && !isAudioSequenceActive) return [];
+		const raw = message.content || '';
+		return splitIntoSmartSegments(raw);
+	});
+
+	let ttsSettingsVersion = $state(0);
+
+	$effect(() => {
+		if (!isLastAssistantMessage && !isAudioSequenceActive) return;
+		const handleTtsChanged = () => {
+			ttsSettingsVersion += 1;
+		};
+		if (typeof window !== 'undefined') {
+			window.addEventListener('deiningTtsSettingsChanged', handleTtsChanged);
+			return () => {
+				window.removeEventListener('deiningTtsSettingsChanged', handleTtsChanged);
+			};
+		}
+	});
+
+	let isSyncDisplayConfigured = $derived.by(() => {
+		// eslint-disable-next-line @typescript-eslint/no-unused-expressions
+		ttsSettingsVersion;
+		return typeof window !== 'undefined' && 
+			localStorage.getItem('deining_tts_enabled') === 'true' && 
+			localStorage.getItem('deining_tts_sync_display') === 'true';
+	});
+
+	let isSyncActive = $derived(
+		!isAborted && (isSyncDisplayActive || (isLastAssistantMessage && isStreaming && isSyncDisplayConfigured))
+	);
+
+	let firstSpeechSegmentIndex = $derived.by(() => {
+		const idx = segments.findIndex((s) => s.isSpeech);
+		return idx !== -1 ? idx : 0;
+	});
+
+	let visibleContent = $derived.by(() => {
+		// 未整形の平文デバッグ表示モード時は、音声同期隠しやタイプライターを行わず即座に全文平文表示
+		if (isRawTextMode) return message.content;
+		// ⚡ 生成強制終了時は、音声同期順次表示設定や待機状態に関係なく、その時点の生成文章を即座に全文表示
+		if (isAborted) return message.content;
+		if (!isSyncActive) return message.content;
+		if (segments.length === 0) return message.content;
+
+		// 音声シーケンス未開始（LLMストリーミング生成中）のとき：
+		// 最初のセリフより前にあるト書き段落のみを表示し、セリフは音声再生に合わせて後から開示
+		if (!isAudioSequenceActive) {
+			if (firstSpeechSegmentIndex > 0) {
+				return segments.slice(0, firstSpeechSegmentIndex).map((s) => s.rawText).join('\n\n');
+			}
+			return '';
+		}
+
+		// 音声シーケンス開始後：
+		// currentSegmentIndex までの段落を表示し、最新の「セリフ段落」にのみタイプライター（15 TPS）を適用
+		const activeIdx = currentSegmentIndex;
+
+		return segments.slice(0, activeIdx + 1).map((s, i) => {
+			if (i < activeIdx) return s.rawText;
+			// ト書き（非発話）は絶対にタイプライターを行わず常に全文即時表示
+			if (!s.isSpeech) return s.rawText;
+			if (typewriterCharCount !== null && i === activeIdx && s.isSpeech) {
+				return s.rawText.slice(0, typewriterCharCount);
+			}
+			return s.rawText;
+		}).join('\n\n');
+	});
+
+	// タイプライター表示タイマーの制御
+	$effect(() => {
+		if (!isAudioSequenceActive || !isSyncDisplayActive) {
+			if (typewriterTimer) {
+				clearInterval(typewriterTimer);
+				typewriterTimer = null;
+			}
+			typewriterCharCount = null;
+			return;
+		}
+
+		const isTypewriterEnabled = typeof window !== 'undefined' && localStorage.getItem('deining_typewriter_enabled') !== 'false';
+		if (!isTypewriterEnabled) {
+			typewriterCharCount = null;
+			return;
+		}
+
+		const activeIdx = currentSegmentIndex;
+		const targetSegment = segments[activeIdx];
+		if (targetSegment && activeIdx !== lastAnimatedIdx) {
+			lastAnimatedIdx = activeIdx;
+			if (typewriterTimer) {
+				clearInterval(typewriterTimer);
+				typewriterTimer = null;
+			}
+
+			// ト書き（TTS除外・非発話）段落はタイプライターを行わず即時表示
+			if (!targetSegment.isSpeech) {
+				typewriterCharCount = null;
+				return;
+			}
+
+			const rawText = targetSegment.rawText;
+			if (rawText.length > 0) {
+				typewriterCharCount = 1;
+				const speed = parseInt(localStorage.getItem('deining_typewriter_speed') || '10', 10);
+				const intervalMs = Math.max(15, Math.round(1000 / (speed || 10)));
+
+				typewriterTimer = setInterval(() => {
+					if (typewriterCharCount !== null && typewriterCharCount < rawText.length) {
+						typewriterCharCount += 1;
+					} else {
+						if (typewriterTimer) {
+							clearInterval(typewriterTimer);
+							typewriterTimer = null;
+						}
+						typewriterCharCount = null;
+					}
+				}, intervalMs);
+			}
+		}
+	});
+
+	function startAudioSequence(enableSyncDisplay: boolean = false) {
+		if (isAborted) return;
+		if (naturalAdvanceTimer) {
+			clearTimeout(naturalAdvanceTimer);
+			naturalAdvanceTimer = null;
+		}
+		sequenceId += 1;
+		const currentSeq = sequenceId;
+		isAudioSequenceActive = true;
+		if (segments.length === 0) {
+			isAudioSequenceActive = false;
+			return;
+		}
+		isSyncDisplayActive = enableSyncDisplay;
+		isSyncWaiting = false;
+
+		// 最初の発話セグメント（isSpeech: true）を探索
+		const firstSpeechIdx = segments.findIndex((s) => s.isSpeech);
+
+		if (firstSpeechIdx === -1) {
+			// セリフが1つもない（すべてト書き等）場合：全セグメントを表示してシーケンス完了
+			currentSegmentIndex = segments.length - 1;
+			isAudioSequenceActive = false;
+			isSyncDisplayActive = false;
+			return;
+		}
+
+		// 最初のセリフまで進め、手前のト書き（連続ト書き含む）も同時にアンロックして再生
+		currentSegmentIndex = firstSpeechIdx;
+		playSegmentAt(firstSpeechIdx, currentSeq);
+	}
+
+	function stopAudioSequence() {
+		sequenceId += 1;
+		isSyncWaiting = false;
+		if (naturalAdvanceTimer) {
+			clearTimeout(naturalAdvanceTimer);
+			naturalAdvanceTimer = null;
+		}
+		if (typewriterTimer) {
+			clearInterval(typewriterTimer);
+			typewriterTimer = null;
+		}
+		typewriterCharCount = null;
+		isAudioSequenceActive = false;
+		isSyncDisplayActive = false;
+		currentSegmentIndex = segments.length - 1;
+		ttsStore.stop(true);
+		if (typeof window !== 'undefined' && typeof (window as any).stopTTS === 'function') {
+			(window as any).stopTTS(true);
+		}
+	}
+
+	// 後続のセリフ文節を順次バックグラウンドで先読み生成するパイプライン
+	async function prefetchUpcomingSegments(startIndex: number, targetSeq: number) {
+		if (isAborted || typeof window === 'undefined' || typeof (window as any).prefetchTTS !== 'function') return;
+
+		for (let i = startIndex; i < segments.length; i++) {
+			if (isAborted || !isAudioSequenceActive || targetSeq !== sequenceId) break;
+			const upcomingSeg = segments[i];
+			if (upcomingSeg && upcomingSeg.isSpeech && upcomingSeg.speakableText) {
+				// 順次先読みリクエスト（裏で先行生成し、終わったらさらに次を先読み）
+				await (window as any).prefetchTTS(upcomingSeg.speakableText);
+			}
+		}
+	}
+
+	function playSegmentAt(index: number, targetSeq: number) {
+		if (isAborted || !isAudioSequenceActive || targetSeq !== sequenceId) return;
+		const seg = segments[index];
+		if (!seg) return;
+
+		if (naturalAdvanceTimer) {
+			clearTimeout(naturalAdvanceTimer);
+			naturalAdvanceTimer = null;
+		}
+
+		if (seg.isSpeech) {
+			isSyncWaiting = true;
+			if (typeof window !== 'undefined' && typeof (window as any).playTTS === 'function') {
+				(window as any).playTTS(seg.speakableText, true, seg.rawText);
+			}
+			// ⚡ 先読みパイプライン起動：再生中に次の文節以降を裏でどんどん先行合成！
+			prefetchUpcomingSegments(index + 1, targetSeq);
+		} else {
+			// 万一非発話セグメントが直接渡された場合でも、停止せず次のセリフへ自動進行する安全ネット
+			isSyncWaiting = false;
+			advanceToNextSegment(targetSeq);
+		}
+	}
+
+	function advanceToNextSegment(targetSeq: number) {
+		if (!isAudioSequenceActive || targetSeq !== sequenceId) return;
+
+		if (naturalAdvanceTimer) {
+			clearTimeout(naturalAdvanceTimer);
+			naturalAdvanceTimer = null;
+		}
+
+		// 現在位置より後ろにある、次の発話セグメント（isSpeech: true）を探索
+		let nextSpeechIdx = -1;
+		for (let i = currentSegmentIndex + 1; i < segments.length; i++) {
+			if (segments[i].isSpeech) {
+				nextSpeechIdx = i;
+				break;
+			}
+		}
+
+		if (nextSpeechIdx !== -1) {
+			// 次のセリフが見つかった場合：途中のト書き（連続ト書き含む）も含めてそのセリフまで一気に進めて再生
+			currentSegmentIndex = nextSpeechIdx;
+			playSegmentAt(nextSpeechIdx, targetSeq);
+		} else {
+			// 後続にセリフがない（末尾までト書きのみ、または末尾に到達）：
+			// 残りのト書きをすべて表示し、音声シーケンスを正常終了
+			currentSegmentIndex = segments.length - 1;
+			isAudioSequenceActive = false;
+			isSyncDisplayActive = false;
+			isSyncWaiting = false;
+		}
+	}
+
+	// ストリーミング状態の監視：ストリーミング中 -> 完了した瞬間に順次音声シーケンスをトリガー
+	$effect(() => {
+		const streaming = isStreaming;
+		if (streaming && isLastAssistantMessage) {
+			wasStreaming = true;
+			localAborted = false;
+		} else if (wasStreaming && !streaming && isLastAssistantMessage) {
+			wasStreaming = false;
+			// ⚡ 中断（強制終了）時はTTSの読み上げを絶対に発火させない
+			if (isAborted) return;
+			const isTtsEnabled = typeof window !== 'undefined' && localStorage.getItem('deining_tts_enabled') === 'true';
+			if (isTtsEnabled && segments.length > 0) {
+				const isSyncDisplay = typeof window !== 'undefined' && localStorage.getItem('deining_tts_sync_display') === 'true';
+				startAudioSequence(isSyncDisplay);
+			}
+		}
+	});
+
+	// 生成強制終了イベントの購読：停止ボタン押下時に即座にTTSを停止し、全文即時開示へ遷移
+	$effect(() => {
+		if (!isLastAssistantMessage && !isAudioSequenceActive) return;
+		const handleAborted = (e: CustomEvent<{ convId?: string; messageId?: string }>) => {
+			const targetId = e.detail?.messageId;
+			if (!targetId || targetId === message.id || (isLastAssistantMessage && (isStreaming || wasStreaming))) {
+				localAborted = true;
+				wasStreaming = false;
+				stopAudioSequence();
+			}
+		};
+		if (typeof window !== 'undefined') {
+			window.addEventListener('deiningGenerationAborted', handleAborted as EventListener);
+			return () => {
+				window.removeEventListener('deiningGenerationAborted', handleAborted as EventListener);
+			};
+		}
+	});
+
+	$effect(() => {
+		if (!isLastAssistantMessage && !isAudioSequenceActive) return;
+		const handleTtsStateChanged = (e: CustomEvent<{ isPlaying: boolean }>) => {
+			isAudioPlaying = e.detail.isPlaying;
+			if (!e.detail.isPlaying) {
+				// isSyncWaiting が true の場合のみ、自然終了として次へ進める (0.2秒の自然な間を置く)
+				if (isAudioSequenceActive && isSyncWaiting) {
+					isSyncWaiting = false;
+					if (naturalAdvanceTimer) {
+						clearTimeout(naturalAdvanceTimer);
+					}
+					const currentSeq = sequenceId;
+					naturalAdvanceTimer = setTimeout(() => {
+						naturalAdvanceTimer = null;
+						advanceToNextSegment(currentSeq);
+					}, 200);
+				}
+			}
+		};
+		if (typeof window !== 'undefined') {
+			window.addEventListener('deiningTtsStateChanged', handleTtsStateChanged as EventListener);
+			return () => {
+				window.removeEventListener('deiningTtsStateChanged', handleTtsStateChanged as EventListener);
+			};
+		}
+	});
+
+	function handleNextSegment() {
+		if (!isAudioSequenceActive) return;
+
+		// 1. レースコンディション防止：既存の待機・自然終了タイマーおよびタイプライターを即座に破棄
+		if (naturalAdvanceTimer) {
+			clearTimeout(naturalAdvanceTimer);
+			naturalAdvanceTimer = null;
+		}
+		if (typewriterTimer) {
+			clearInterval(typewriterTimer);
+			typewriterTimer = null;
+		}
+		typewriterCharCount = null;
+
+		// 待機フラグを解除し、新しいシーケンスIDを発行
+		isSyncWaiting = false;
+		sequenceId += 1;
+		const nextSeq = sequenceId;
+
+		// 2. 音声の完全停止（旧音声の停止・余波イベントは新しい sequenceId により無効化される）
+		// ※ 次のセリフへ進むため、先読みキャッシュは保持（false）したまま現在再生中の音声のみ即時停止する
+		ttsStore.stop(false);
+		if (typeof window !== 'undefined' && typeof (window as any).stopTTS === 'function') {
+			(window as any).stopTTS(false);
+		}
+
+		// 3. 次のセグメントへ進める
+		advanceToNextSegment(nextSeq);
+	}
+
+	function handleSkipAllSegments() {
+		stopAudioSequence();
+	}
+
+	function handlePlayAudio() {
+		if (isAudioSequenceActive || ttsStore.isPlaying) {
+			stopAudioSequence();
+			ttsStore.stop();
+		} else {
+			// Play audio手動押下時は順次表示は行わず、全文表示のまま音声のみ段落分割順次再生
+			startAudioSequence(false);
+		}
+	}
+</script>
+
+<div
+	bind:this={assistantEl}
+	class="chat-message-assistant text-sm leading-relaxed md:text-md md:leading-7.5 group w-full {className}"
+	style:--last-user-message-height={lastUserMessageHeight > 0
+		? `${lastUserMessageHeight}px`
+		: undefined}
+	style:--assistant-margin-top={assistantMarginTop > 0 ? `${assistantMarginTop}px` : undefined}
+	role="group"
+	aria-label="Assistant message with actions"
+>
+	{#if showProcessingInfoTop}
+		<div class="mt-6 w-full max-w-3xl" in:fade>
+			<div class="processing-container">
+				<span class="processing-text">
+					{modelLoadingText ??
+						processingState.getPromptProgressText() ??
+						processingState.getProcessingMessage() ??
+						'Processing...'}
+				</span>
+			</div>
+		</div>
+	{/if}
+
+	{#if editCtx.isEditing}
+		<ChatMessageEditForm />
+	{:else if message.role === MessageRole.ASSISTANT}
+		{#if showRawOutput}
+			<pre class="raw-output">{rawOutputContent || ''}</pre>
+		{:else}
+			{@const displayMsg = { ...message, content: visibleContent }}
+			<ChatMessageAgenticContent
+				message={displayMsg}
+				{toolMessages}
+				isStreaming={isChatStreaming()}
+				{isLastAssistantMessage}
+				highlightTurns={highlightAgenticTurns}
+			/>
+			{@const activeSegIdx = currentSegmentIndex}
+			{#if !isAborted && isSyncDisplayActive && activeSegIdx < segments.length - 1}
+				<div class="mt-2 flex flex-wrap items-center gap-2">
+					<button
+						type="button"
+						onclick={handleNextSegment}
+						class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md bg-primary/15 hover:bg-primary/25 text-primary transition-colors border border-primary/25 shadow-xs"
+					>
+						<span class="text-sm">⏭️</span> {t('chat.next', 'Next')}
+					</button>
+					<button
+						type="button"
+						onclick={handleSkipAllSegments}
+						class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-md bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors border border-border/40"
+					>
+						<span class="text-xs">⏩</span> {t('chat.skipAll', 'Skip All')}
+					</button>
+					<span class="text-[11px] text-muted-foreground animate-pulse">
+						{t('chat.syncing', 'Displaying text in sync with voice...')} ({activeSegIdx + 1} / {segments.length})
+					</span>
+				</div>
+			{/if}
+		{/if}
+	{:else}
+		<div class="text-sm whitespace-pre-wrap">
+			{messageContent}
+		</div>
+	{/if}
+
+	{#if message.recalledMemories}
+		<ChatMessageRecalledMemories memories={message.recalledMemories} />
+	{/if}
+
+	{#if showProcessingInfoBottom}
+		<div class="mt-4 w-full max-w-3xl" in:fade>
+			<div class="processing-container">
+				<span class="processing-text">
+					{modelLoadingText ??
+						processingState.getPromptProgressText() ??
+						processingState.getProcessingMessage() ??
+						'Processing...'}
+				</span>
+			</div>
+		</div>
+	{/if}
+
+	<div class="info my-2.5 gap-2 md:my-6 md:gap-4 grid tabular-nums">
+		{#if displayedModel}
+			<div
+				bind:this={statsContainerEl}
+				class="inline-flex flex-wrap items-start gap-2 text-xs text-muted-foreground"
+			>
+				{#if isRouter}
+					<div class="hidden md:inline-flex">
+						<ModelsSelectorDropdown
+							currentModel={pendingModel ?? displayedModel}
+							disabled={isLoading()}
+							onModelChange={async (modelId: string, modelName: string) => {
+								const status = modelsStore.getModelStatus(modelId);
+
+								if (status !== ServerModelStatus.LOADED) {
+									pendingModel = modelId;
+
+									try {
+										await modelsStore.loadModel(modelId);
+									} finally {
+										pendingModel = null;
+									}
+								}
+
+								if (isAudioSequenceActive || ttsStore.isPlaying) {
+									console.warn('[onRegenerate] Blocked: TTS audio is playing');
+									return false;
+								}
+								onRegenerate(modelName);
+								return true;
+							}}
+						/>
+					</div>
+				{:else}
+					<div class="hidden md:inline-flex">
+						<ModelBadge model={displayedModel || undefined} onclick={handleCopyModel} />
+					</div>
+				{/if}
+
+				{#if currentConfig.showMessageStats && message.timings && message.timings.predicted_n && message.timings.predicted_ms}
+					{@const agentic = message.timings.agentic}
+					<ChatMessageStatistics
+						promptTokens={agentic ? agentic.llm.prompt_n : message.timings.prompt_n}
+						promptMs={agentic ? agentic.llm.prompt_ms : message.timings.prompt_ms}
+						predictedTokens={agentic ? agentic.llm.predicted_n : message.timings.predicted_n}
+						predictedMs={agentic ? agentic.llm.predicted_ms : message.timings.predicted_ms}
+						agenticTimings={agentic}
+						onActiveViewChange={handleStatsViewChange}
+					/>
+				{:else if isLoading() && currentConfig.showMessageStats}
+					{@const liveStats = processingState.getLiveProcessingStats()}
+					{@const genStats = processingState.getLiveGenerationStats()}
+					{@const promptProgress = processingState.processingState?.promptProgress}
+					{@const isStillProcessingPrompt =
+						promptProgress && promptProgress.processed < promptProgress.total}
+
+					{#if liveStats || genStats}
+						<ChatMessageStatistics
+							isLive
+							isProcessingPrompt={!!isStillProcessingPrompt}
+							promptTokens={liveStats?.tokensProcessed}
+							promptMs={liveStats?.timeMs}
+							predictedTokens={genStats?.tokensGenerated}
+							predictedMs={genStats?.timeMs}
+						/>
+					{/if}
+				{/if}
+			</div>
+		{/if}
+	</div>
+
+
+
+	{#if message.timestamp && !editCtx.isEditing}
+		<ChatMessageActionIcons
+			role={MessageRole.ASSISTANT}
+			justify="start"
+			actionsPosition="left"
+			{siblingInfo}
+			{showDeleteDialog}
+			{deletionInfo}
+			{onCopy}
+			{onEdit}
+			{onRegenerate}
+			onContinue={currentConfig.enableContinueGeneration ? onContinue : undefined}
+			{onForkConversation}
+			{onDelete}
+			{onConfirmDelete}
+			{onNavigateToSibling}
+			{onShowDeleteDialogChange}
+			showRawOutputSwitch={currentConfig.showRawOutputSwitch}
+			rawOutputEnabled={showRawOutput}
+			onRawOutputToggle={(enabled) => (showRawOutput = enabled)}
+			onPlayAudio={handlePlayAudio}
+			isAudioPlaying={isAudioSequenceActive || (isLastAssistantMessage && ttsStore.isPlaying)}
+		/>
+	{/if}
+</div>
+
+<style>
+	:global(.chat-message):last-child .chat-message-assistant {
+		--assistant-min-height-offset: calc(
+			var(--last-user-message-height, 19rem) + var(--chat-form-height, 6rem) +
+				var(--chat-form-bottom-position, 0.5rem) + var(--chat-form-padding-top, 6rem) +
+				var(--assistant-margin-top, 3rem)
+		);
+		min-height: calc(100dvh - var(--assistant-min-height-offset));
+
+		@media (width > 768px) {
+			--assistant-min-height-offset: calc(
+				var(--last-user-message-height, 18rem) + var(--chat-form-height, 6rem) +
+					var(--chat-form-bottom-position, 1rem) + var(--chat-form-padding-top, 6rem) +
+					var(--assistant-margin-top, 3rem)
+			);
+		}
+	}
+
+	.processing-container {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.5rem;
+	}
+
+	.processing-text {
+		background: linear-gradient(
+			90deg,
+			var(--muted-foreground),
+			var(--foreground),
+			var(--muted-foreground)
+		);
+		background-size: 200% 100%;
+		background-clip: text;
+		-webkit-background-clip: text;
+		-webkit-text-fill-color: transparent;
+		animation: shine 1s linear infinite;
+		font-weight: 500;
+		font-size: 0.875rem;
+	}
+
+	@keyframes shine {
+		to {
+			background-position: -200% 0;
+		}
+	}
+
+	.raw-output {
+		width: 100%;
+		max-width: 48rem;
+		margin-top: 1.5rem;
+		padding: 1rem 1.25rem;
+		border-radius: 1rem;
+		background: hsl(var(--muted) / 0.3);
+		color: var(--foreground);
+		font-size: 0.875rem;
+		line-height: 1.6;
+		white-space: pre-wrap;
+		word-break: break-word;
+	}
+
+	@media (max-width: 768px) {
+		:global(.chat-message-assistant) {
+			text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+		}
+	}
+</style>

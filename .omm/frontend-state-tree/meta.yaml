@@ -1,0 +1,40 @@
+created: 2026-10-11T09:14:21.809Z
+updated: 2026-10-11T09:18:28.092Z
+update_count: 9
+last_field: diagram
+git_commit: f679253
+git_branch: main
+children:
+  - chat-rune
+  - context-gauge
+  - conv-rune
+  - debug-panel
+  - indexed-db
+  - reconciler
+prev_diagram: "graph LR\r
+
+  \    chat-rune[\"chat.svelte.ts\\n対話Runes & 要約ステート\"]\r
+
+  \    conv-rune[\"conversations.svelte.ts\\n会話ツリー & ブランチ切替\"]\r
+
+  \    reconciler[\"reconcileSummarySnapshot\\n不変条件の補正・復元\"]\r
+
+  \    context-gauge[\"context-breakdown.ts\\n7大要素トークン比率計算\"]\r
+
+  \    indexed-db[\"database.service.ts\\nDexie / IndexedDB永続化\"]\r
+
+  \    debug-panel[\"DebugPanel.svelte\\n記憶状態 & トークン可視化\"]\r
+
+  \r
+
+  \    chat-rune -- メッセージ送受信・要約発火 --> conv-rune\r
+
+  \    conv-rune -- 世界線切替・削除・ブランチ作成 --> reconciler\r
+
+  \    reconciler -- 補正済みスナップショット適用 --> chat-rune\r
+
+  \    chat-rune -- プロンプト内訳の推定 --> context-gauge\r
+
+  \    conv-rune -- ツリーノード・アーカイブ保存 --> indexed-db\r
+
+  \    chat-rune -- ステータス・想起記憶の伝達 --> debug-panel\r\n"

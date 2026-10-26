@@ -1,0 +1,1 @@
+Svelte 5 Runes、Vite、Tailwind CSSで構築されたSPA。OKLCHテーマ、コンテキストゲージ、アバター操作、TTS再生キューを管理。

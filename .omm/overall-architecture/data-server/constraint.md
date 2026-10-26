@@ -1,0 +1,1 @@
+DNS Rebinding対策（Host検証）およびOrigin検証（ALLOWED_ORIGINS）を厳格に維持すること。破壊的操作にGETを使わないこと。

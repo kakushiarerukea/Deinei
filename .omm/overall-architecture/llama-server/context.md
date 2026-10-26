@@ -1,0 +1,1 @@
+Flash Attention (--flash-attn on)、Prefix Caching (--cache-reuse 256)、VRAMプロファイルに応じたMoE CPUオフロード引数を適用。

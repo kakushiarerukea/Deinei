@@ -1,0 +1,45 @@
+created: 2026-10-11T09:14:23.668Z
+updated: 2026-10-11T09:18:28.304Z
+update_count: 9
+last_field: diagram
+git_commit: f679253
+git_branch: main
+children:
+  - hw-detect
+  - install-bat
+  - offline-wheels
+  - profile-gen
+  - setup-ps1
+  - start-launcher
+  - uv-env
+prev_diagram: "graph LR\r
+
+  \    install-bat[\"install.bat\\n唯一の実行エントリー\"]\r
+
+  \    setup-ps1[\"installer/setup.ps1\\nUTF-8 with BOM 自動セットアップ\"]\r
+
+  \    hw-detect[\"GPU / VRAM判定\\nnvidia-smi / WMIクエリ\"]\r
+
+  \    profile-gen[\"deining_profile.bat\\nVRAM別最適化引数の出力\"]\r
+
+  \    uv-env[\"uv & 統合仮想環境\\nbackend/.venv (Python 3.10)\"]\r
+
+  \    offline-wheels[\"同梱wheel優先導入\\ndacvae / silentcipher\"]\r
+
+  \    start-launcher[\"start_ai_servers.bat\\n全サーバー一括起動 & ポーリング\"]\r
+
+  \r
+
+  \    install-bat -- PowerShell呼び出し --> setup-ps1\r
+
+  \    setup-ps1 -- ハードウェア精密検査 --> hw-detect\r
+
+  \    hw-detect -- 24GB / 16GB / 12GB 判定 --> profile-gen\r
+
+  \    setup-ps1 -- uv による超高速仮想環境構築 --> uv-env\r
+
+  \    setup-ps1 -- オフライン同梱アセット導入 --> offline-wheels\r
+
+  \    profile-gen -- 起動引数注入 --> start-launcher\r
+
+  \    uv-env -- Python実行バイナリ特定 --> start-launcher\r\n"

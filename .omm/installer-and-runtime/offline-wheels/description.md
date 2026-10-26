@@ -1,0 +1,1 @@
+installer/wheels に同梱された wheel（dacvae, silentcipher等）を最優先でインストールし、Gitやネットワーク依存を排除。

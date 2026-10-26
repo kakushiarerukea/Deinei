@@ -1,0 +1,14 @@
+graph LR
+    install-bat["install.bat\n唯一の実行エントリー"]
+    setup-ps1["installer/setup.ps1\nUTF-8 with BOM 自動セットアップ"]
+    hw-detect["GPU / VRAM判定\nnvidia-smi / WMIクエリ"]
+    profile-gen["deining_profile.bat\nVRAM別最適化引数の出力"]
+    uv-env["uv & 統合仮想環境\nbackend/.venv (Python 3.10)"]
+    start-launcher["start_ai_servers.bat\n全サーバー一括起動 & ポーリング"]
+
+    install-bat -->|セットアップ呼出| setup-ps1
+    setup-ps1 -->|GPU容量検査| hw-detect
+    hw-detect -->|VRAMプロファイル判定| profile-gen
+    setup-ps1 -->|仮想環境構築| uv-env
+    profile-gen -->|起動引数注入| start-launcher
+    uv-env -->|Python特定| start-launcher

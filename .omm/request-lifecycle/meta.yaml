@@ -1,0 +1,53 @@
+created: 2026-10-11T09:03:57.550Z
+updated: 2026-10-11T09:18:27.749Z
+update_count: 13
+last_field: diagram
+git_commit: f679253
+git_branch: main
+children:
+  - llama-api
+  - llm-stream
+  - memory-api
+  - memory-retrieval
+  - search-trigger
+  - silence-handler
+  - stage1-llm
+  - summary-api
+  - tts-api
+  - typewriter-tts
+  - ui-state
+  - user
+  - user-input
+prev_diagram: "graph LR\r
+
+  \    user-input[\"ユーザー入力\\n通常発話 or 空送信\"]\r
+
+  \    silence-handler[\"沈黙検知・動的注入\\n…… をト書き促進指示へ一時変換\"]\r
+
+  \    search-trigger[\"キーワード事前判定 (0ms)\\n検索指示の有無を高速検査\"]\r
+
+  \    stage1-llm[\"Stage 1 検索最適化 (該当時)\\n文脈解決・Open-Meteo・News\"]\r
+
+  \    memory-retrieval[\"記憶想起 & 相対時間計算\\nFact / Episode / [3日前]\"]\r
+
+  \    llm-stream[\"LLMストリーミング生成\\nGPU 100%専有・高速推論\"]\r
+
+  \    typewriter-tts[\"時分割TTS & 15TPS同期\\nLLM完了後に音声合成 & 口パク\"]\r
+
+  \r
+
+  \    user-input -- 空送信なら --> silence-handler\r
+
+  \    user-input -- 通常送信なら --> search-trigger\r
+
+  \    silence-handler -- コンテキスト結合 --> memory-retrieval\r
+
+  \    search-trigger -- キーワード合致時のみ --> stage1-llm\r
+
+  \    search-trigger -- 雑談時 (KVキャッシュ保全) --> memory-retrieval\r
+
+  \    stage1-llm -- 検索スニペット取得 --> memory-retrieval\r
+
+  \    memory-retrieval -- プロンプト送信 --> llm-stream\r
+
+  \    llm-stream -- 生成完了トリガー --> typewriter-tts\r\n"

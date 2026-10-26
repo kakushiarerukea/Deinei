@@ -1,0 +1,1 @@
+高速パッケージマネージャー uv を自動調達し、backend/.venv に Python 3.10 仮想環境と PyTorch (CUDA 12.8) を構築。

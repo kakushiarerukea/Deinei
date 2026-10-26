@@ -1,0 +1,41 @@
+created: 2026-10-11T09:14:19.300Z
+updated: 2026-10-11T09:18:27.625Z
+update_count: 5
+last_field: diagram
+kind: nested-class
+title: parent-child
+children: []
+parentPath: []
+prev_diagram: "graph LR\r
+
+  \    pushout-block[\"押し出された要約親テキスト\\n約500文字エピソード\"]\r
+
+  \    key-extract[\"子要素キーフレーズ抽出\\nカギ括弧・固有名詞・出来事\"]\r
+
+  \    det-id[\"決定論的ID生成\\nsha256(pc_session_msg_idx)\"]\r
+
+  \    chroma-upsert[\"ChromaDB upsert\\nParent-Childメタデータ\"]\r
+
+  \    dual-query[\"Dual-Query並行検索\\nFactクエリと分離実行\"]\r
+
+  \    admission[\"Admission合否判定\\nコサイン距離 0.150以下\"]\r
+
+  \    ranking[\"Ranking順位付け\\n風化ペナルティ (0.002/日)\"]\r
+
+  \    safe-cap[\"句点安全切断 & 800文字キャップ\\n最大2件注入\"]\r
+
+  \r
+
+  \    pushout-block -- キーワード抽出 --> key-extract\r
+
+  \    key-extract -- 重複耐性ハッシュ --> det-id\r
+
+  \    det-id -- ベクトル登録 --> chroma-upsert\r
+
+  \    chroma-upsert -- 対話時の検索 --> dual-query\r
+
+  \    dual-query -- 厳格閾値判定 --> admission\r
+
+  \    admission -- 時間経過考慮ソート --> ranking\r
+
+  \    ranking -- 安全な文字数成形 --> safe-cap\r\n"

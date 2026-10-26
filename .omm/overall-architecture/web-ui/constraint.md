@@ -1,0 +1,1 @@
+custom_public 内のビルド済み bundle.js を直接改変しないこと。必ず tools/ui 内で修正し npm run build:deining を実行すること。

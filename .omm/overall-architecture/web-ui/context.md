@@ -1,0 +1,1 @@
+backend/llama.cpp-b9873/tools/ui/src/ で開発され、ビルド成果物は custom_public に配置されて llama-server から配信されます。

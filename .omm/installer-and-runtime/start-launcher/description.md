@@ -1,0 +1,1 @@
+llama-server、TTS、Flaskプロキシを順次起動し、PowerShellのインテリジェント・ポーリングで全サーバーReadyを検知してブラウザを開く。

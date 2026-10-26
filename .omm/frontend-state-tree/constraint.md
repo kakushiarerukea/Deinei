@@ -1,0 +1,1 @@
+lastSummarizedIndex の補正は reconcileSummarySnapshot を経由させ、個別のコンポーネントで独自補正しないこと。

@@ -1,0 +1,1 @@
+ChromaDB PersistentClientによるローカルベクトルデータベース。cl-nagoya/ruri-v3-310m を用いて長期記憶と親子エピソードを保持。

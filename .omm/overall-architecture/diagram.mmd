@@ -1,0 +1,16 @@
+graph LR
+    web-ui["WebUI フロントエンド\nSvelte 5 / Vite"]
+    llama-server["LLM推論 & 静的配信\nllama-server.exe (8080)"]
+    data-server["Flaskメインプロキシ\nserver.py (5000)"]
+    tts-server["TTS音声合成サーバー\ntts_server.py (5001)"]
+    chroma-db["ChromaDB ベクトルストア\ncl-nagoya/ruri-v3-310m"]
+    session-store["セッションJSON永続化\nchats/*.json"]
+    live2d-engine["Live2D描画 & 同期\navatar-core-v2.js"]
+
+    web-ui -->|LLM推論ストリーム| llama-server
+    web-ui -->|記憶・要約・Web検索API| data-server
+    web-ui -->|WAV音声合成| tts-server
+    web-ui -->|表情・口パク制御| live2d-engine
+    data-server -->|ベクトル埋め込み検索| chroma-db
+    data-server -->|会話履歴の読書| session-store
+    data-server -->|推論リクエスト中継| llama-server

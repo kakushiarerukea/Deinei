@@ -1,0 +1,16 @@
+graph LR
+    user-msg["ユーザーメッセージ"]
+    short-term["層1: 短期生ログ\n最新未要約メッセージ"]
+    episodic-summary["層2: 中期エピソード要約\n30件トリガー / 16ブロック保持"]
+    forgetting-slide["忘却スライディング\n押し出しブロックをChromaDBへ"]
+    fact-memory["層3: 長期事実 & 親子想起\nChromaDB ruri-v3-310m"]
+    prompt-inject["LLMコンテキスト構築\nPrefix Caching保全注入"]
+
+    user-msg -->|最新ターン追加| short-term
+    short-term -->|未要約30件以上| episodic-summary
+    episodic-summary -->|ブロック16件以上| forgetting-slide
+    forgetting-slide -->|押し出し要約登録| fact-memory
+    episodic-summary -->|事実箇条書き抽出| fact-memory
+    short-term -->|生ログスライス| prompt-inject
+    episodic-summary -->|要約ブロック結合| prompt-inject
+    fact-memory -->|関連エピソード想起| prompt-inject

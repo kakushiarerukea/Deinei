@@ -1,0 +1,1 @@
+setup.ps1 は必ず UTF-8 with BOM で保存すること。start_ai_servers.bat はGit管理外の生成物であり、変更は installer/templates/ 側に入れること。改行は CRLF を維持すること。

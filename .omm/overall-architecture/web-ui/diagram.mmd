@@ -1,0 +1,13 @@
+graph LR
+    ui-routes["UIルート & ページ\nroutes/+page.svelte"]
+    chat-store["チャット状態管理\nstores/chat.svelte.ts"]
+    conv-store["会話ツリー管理\nstores/conversations.svelte.ts"]
+    db-service["IndexedDB永続化\nservices/database.service.ts"]
+    chat-service["APIクライアント通信\nservices/chat.service.ts"]
+    avatar-bridge["アバター通信ブリッジ\nLive2DControls.svelte"]
+
+    ui-routes -->|ユーザー入力バインド| chat-store
+    chat-store -->|履歴ツリー同期| conv-store
+    chat-store -->|API呼出| chat-service
+    conv-store -->|ローカル永続化| db-service
+    chat-store -->|表情・音声トリガー| avatar-bridge

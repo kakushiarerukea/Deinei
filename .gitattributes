@@ -1,0 +1,46 @@
+# Ensure Windows batch and PowerShell scripts are always checked out and stored with CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# ======================================================================
+# GitHub Linguist 設定（外部ライブラリの言語統計除外 / 独自コードの集計）
+# ======================================================================
+
+# --- 外部ライブラリ・サードパーティOSSコードの統計除外 (vendored) ---
+# 1. llama.cpp 本体 (C/C++ 推論エンジンコード群)
+backend/llama.cpp-b9873/** linguist-vendored
+
+# 2. Irodori-TTS 本体ライブラリ (学習・推論・ユーティリティコード)
+backend/Irodori-TTS/** linguist-vendored
+
+# 3. ReazonSpeech 本体ライブラリ (音声認識・アライメントコード)
+backend/ReazonSpeech/** linguist-vendored
+
+# 4. バンドル wheel パッケージ
+installer/wheels/** linguist-vendored
+
+
+# --- 泥濘 (Deinei) 独自開発コードの明示的カウント保持 ---
+# 独自Web UI (Svelte 5 / TypeScript / CSS)
+backend/llama.cpp-b9873/tools/ui/** linguist-vendored=false
+
+# Live2Dアバター制御コアエンジン (JavaScript)
+backend/llama.cpp-b9873/tools/ui/static/deining/avatar-core-v2.js linguist-vendored=false
+
+# 独自TTSサーバーAPI (Python)
+backend/Irodori-TTS/tts_server.py linguist-vendored=false
+
+# 泥濘中継プロキシ & RAG & 記憶要約バックエンド (Python)
+backend/data/server.py linguist-vendored=false
+
+# 自動インストーラー (PowerShell / Batch)
+installer/setup.ps1 linguist-vendored=false
+install.bat linguist-vendored=false
+
+# スプラッシュ画面 (HTML)
+splash.html linguist-vendored=false
+
+# 3D Avatar & Animation Binaries
+*.vrma binary
+*.vrm binary

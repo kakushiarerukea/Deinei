@@ -1,0 +1,1 @@
+PixiJS + Pixi Live2D Display + avatar-core-v2.js によるアバター描画。口パク、感情表現、おさわり判定、視線追従を制御。

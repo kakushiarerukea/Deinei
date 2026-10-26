@@ -1,0 +1,44 @@
+created: 2026-10-11T09:14:17.742Z
+updated: 2026-10-11T09:18:27.422Z
+update_count: 13
+last_field: diagram
+git_commit: f679253
+git_branch: main
+children:
+  - episodic-summary
+  - fact-db
+  - forgetting-slide
+  - parent-child
+  - prompt-inject
+  - short-term
+prev_diagram: "graph LR\r
+
+  \    user-msg[\"ユーザーメッセージ\"]\r
+
+  \    short-term[\"層1: 短期生ログ\\n最新未要約メッセージ\"]\r
+
+  \    episodic-summary[\"層2: 中期エピソード要約\\n30件トリガー / 16ブロック保持\"]\r
+
+  \    forgetting-slide[\"忘却スライディング\\n押し出しブロックをChromaDBへ\"]\r
+
+  \    fact-memory[\"層3: 長期事実 & 親子想起\\nChromaDB ruri-v3-310m\"]\r
+
+  \    prompt-inject[\"LLMコンテキスト構築\\nPrefix Caching保全注入\"]\r
+
+  \r
+
+  \    user-msg -->|最新ターン追加| short-term\r
+
+  \    short-term -->|未要約30件以上| episodic-summary\r
+
+  \    episodic-summary -->|ブロック16件以上| forgetting-slide\r
+
+  \    forgetting-slide -->|押し出し要約の構造化登録| fact-memory\r
+
+  \    episodic-summary -->|客観的事実箇条書き抽出| fact-memory\r
+
+  \    short-term -->|生ログスライス| prompt-inject\r
+
+  \    episodic-summary -->|要約ブロック結合| prompt-inject\r
+
+  \    fact-memory -->|関連エピソード想起| prompt-inject\r\n"

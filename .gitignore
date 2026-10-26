@@ -1,0 +1,147 @@
+# ==========================================
+# 泥濘 (Deining) システム .gitignore
+# ==========================================
+
+# --- 大容量AIモデル & 実行バイナリ (GitHub 100MB制限対策) ---
+llama-b9873-bin-*/
+*.gguf
+**/*.gguf
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx
+
+# --- llama.cpp C/C++ ソースコード除外（公式バイナリ自動取得のため不要。UIソースとビルド成果物のみ追跡） ---
+backend/llama.cpp-b9873/*
+!backend/llama.cpp-b9873/tools/
+!backend/llama.cpp-b9873/custom_public/
+!backend/llama.cpp-b9873/models/
+backend/llama.cpp-b9873/models/*
+!backend/llama.cpp-b9873/models/templates/
+!backend/llama.cpp-b9873/models/templates/*.jinja
+
+# --- 個人データ & 会話ログ & ベクトルDB ---
+backend/data/chats/
+backend/data/chroma_db/
+backend/data/chroma_db_v2/
+backend/data/*.log
+backend/Irodori-TTS/gradio_outputs/
+backend/Irodori-TTS/reference_voice/
+*.wav
+!backend/Irodori-TTS/reference_voice.wav
+*.mp3
+
+# --- Live2D モデルデータ & アセット (著作権・再配布防止) ---
+*fav_usaneko*
+*ulvm2*
+*.moc3
+*.model3.json
+*.cdi3.json
+*.physics3.json
+*.exp3.json
+*.vtube.json
+*.4096/
+*live2dcubismcore*
+*pixi.min.js*
+*cubism4.min.js*
+
+# --- VRM 3Dモデルデータ & アセット (著作権・再配布防止) ---
+*.vrm
+**/*.vrm
+**/deining/vrm/**
+
+# --- Python 仮想環境 & キャッシュ & uv ---
+.venv/
+*/.venv/
+__pycache__/
+*/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+uv.exe
+uvw.exe
+uvx.exe
+installer/uv.exe
+.cache/
+.uv_cache/
+installer/uvw.exe
+installer/uvx.exe
+dist/
+build/
+
+# --- Node / フロントエンド ---
+node_modules/
+*/node_modules/
+.svelte-kit/
+*/.svelte-kit/
+.vite/
+*/.vite/
+build/
+dist/
+
+# --- 環境変数 & 秘密情報 ---
+.env*
+**/.env*
+*.env
+*.pem
+*.key
+
+# --- ログ & 一時ファイル ---
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+*.tmp
+*.bak
+*.jsonl
+debug_screens/
+scratch/
+simulation_logs/
+deining_profile.bat
+/start_ai_servers.bat
+/start_ai_servers_lan.bat
+/start_ai_servers_tailscale.bat
+/deinei_doctor.bat
+/scripts/
+!installer/templates/start_ai_servers.bat
+!installer/templates/start_ai_servers_lan.bat
+!installer/templates/start_ai_servers_tailscale.bat
+!installer/templates/deinei_doctor.bat
+backend/out.txt
+backend/params.txt
+backend/scratch*.txt
+
+# --- OS / エディタ固有 ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# --- 非公開開発資産 & ドキュメント & 直下スクリプト ---
+Implementation/
+assetsForAntigravity/
+test/
+generate_16blocks_mock.py
+inject_mock_to_indexeddb.py
+/setup.ps1
+simulate_chat_and_monitor.py
+simulate_chat_session.py
+dummy_400turns_chat.json
+Temporary_Task.md
+泥濘システム総合完全ガイドforAI.md
+Yondene!.txt
+DevNote.md
+DevNote*.md
+
+# --- AIエージェント設定 & ローカル一時生成物 ---
+.agents/
+.impeccable/
+DESIGN.md
+skills-lock.json
+backend/Irodori-TTS/*.png
+deinei.code-workspace

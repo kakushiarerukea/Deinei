@@ -1,0 +1,1 @@
+0 <= lastSummarizedIndex <= 対話メッセージ件数。要約が0件のとき lastSummarizedIndex は0。世界線外のエピソードを想起に混ぜないこと。

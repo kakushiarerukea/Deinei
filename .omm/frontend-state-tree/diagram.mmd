@@ -1,0 +1,14 @@
+graph LR
+    chat-rune["chat.svelte.ts\n対話Runes & 要約ステート"]
+    conv-rune["conversations.svelte.ts\n会話ツリー & ブランチ切替"]
+    reconciler["reconcileSummarySnapshot\n不変条件の補正・復元"]
+    context-gauge["context-breakdown.ts\n7大要素トークン比率計算"]
+    indexed-db["database.service.ts\nDexie / IndexedDB永続化"]
+    debug-panel["DebugPanel.svelte\n記憶状態 & トークン可視化"]
+
+    chat-rune -->|メッセージ送受信| conv-rune
+    conv-rune -->|世界線切替・削除| reconciler
+    reconciler -->|スナップショット復元| chat-rune
+    chat-rune -->|トークン比率推定| context-gauge
+    conv-rune -->|ツリー永続化| indexed-db
+    chat-rune -->|状態可視化| debug-panel

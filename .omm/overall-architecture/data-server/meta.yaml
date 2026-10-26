@@ -1,0 +1,33 @@
+created: 2026-10-11T09:03:57.052Z
+updated: 2026-10-11T09:18:27.301Z
+update_count: 8
+last_field: diagram
+kind: nested-class
+title: data-server
+children: []
+parentPath: []
+prev_diagram: "graph LR\r
+
+  \    security[\"セキュリティシールド\\nHost / Origin / APIKey\"]\r
+
+  \    session-api[\"セッション管理API\\n/api/sessions\"]\r
+
+  \    memory-api[\"記憶管理API\\n/memory/*\"]\r
+
+  \    proxy-api[\"推論プロキシ\\n/v1/chat/completions\"]\r
+
+  \    search-engine[\"Web検索 & 気象API\\nsearch_trigger.py\"]\r
+
+  \    time-engine[\"相対時間タグ計算\\nget_time_difference_str\"]\r
+
+  \r
+
+  \    security -- 検証通過リクエスト --> proxy-api\r
+
+  \    security -- セッション操作 --> session-api\r
+
+  \    security -- 記憶登録・検索 --> memory-api\r
+
+  \    proxy-api -- キーワード判定 & 検索 --> search-engine\r
+
+  \    proxy-api -- 記憶の想起 & タイムスタンプ変換 --> time-engine\r\n"

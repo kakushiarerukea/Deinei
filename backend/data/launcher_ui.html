@@ -1,0 +1,2141 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>泥濘 (Deinei) 統合サーバーランチャー &amp; テレメトリコンソール</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-deep: #06070e;
+            --bg-base: #0a0b16;
+            --bg-surface: #0f1123;
+            --bg-elevated: #161930;
+
+            --border-hairline: rgba(255, 255, 255, 0.10);
+            --border-strong: rgba(255, 255, 255, 0.20);
+
+            --text-primary: #f8fafc;
+            --text-secondary: #cbd5e1;
+            --text-muted: #94a3b8;
+
+            --accent-primary: #2563eb;
+            --accent-cyan: #7dd3fc;
+            --star-gold: #fde68a;
+            --status-online: #34d399;
+            --status-loading: #fde68a;
+            --status-offline: #f87171;
+            --status-violet: #d8b4fe;
+
+            --font-sans: 'Noto Sans JP', 'Yu Gothic UI', 'Meiryo', sans-serif;
+            --font-mono: 'JetBrains Mono', 'Consolas', monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html, body {
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            background-color: var(--bg-base);
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            font-size: 13px;
+            line-height: 1.45;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        ::selection {
+            background: rgba(125, 211, 252, 0.25);
+            color: var(--text-primary);
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--bg-deep);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(148, 163, 184, 0.35);
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(125, 211, 252, 0.6);
+        }
+
+        :focus-visible {
+            outline: 2px solid var(--accent-cyan);
+            outline-offset: -2px;
+        }
+
+        /* ==========================================================================
+           CELESTIAL INSTRUMENT MOTIFS (CORNER RETICLES & ASTROLABE HAIRLINES)
+           ========================================================================== */
+        .reticle {
+            position: fixed;
+            width: 14px;
+            height: 14px;
+            pointer-events: none;
+            z-index: 50;
+        }
+        .reticle-tl {
+            top: 6px;
+            left: 6px;
+            border-top: 1.5px solid var(--star-gold);
+            border-left: 1.5px solid var(--star-gold);
+        }
+        .reticle-tr {
+            top: 6px;
+            right: 6px;
+            border-top: 1.5px solid var(--star-gold);
+            border-right: 1.5px solid var(--star-gold);
+        }
+        .reticle-bl {
+            bottom: 6px;
+            left: 6px;
+            border-bottom: 1.5px solid var(--star-gold);
+            border-left: 1.5px solid var(--star-gold);
+        }
+        .reticle-br {
+            bottom: 6px;
+            right: 6px;
+            border-bottom: 1.5px solid var(--star-gold);
+            border-right: 1.5px solid var(--star-gold);
+        }
+
+        .astrolabe-watermark {
+            position: fixed;
+            top: 50%;
+            right: -70px;
+            width: 580px;
+            height: 580px;
+            transform: translateY(-50%);
+            pointer-events: none;
+            z-index: 20;
+        }
+
+        .slash-accent {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--star-gold);
+            margin-right: 5px;
+            letter-spacing: 0.02em;
+        }
+
+        .obs-seal {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            padding: 1px 7px;
+            border: 1px solid var(--star-gold);
+            color: var(--star-gold);
+            background: rgba(253, 230, 138, 0.08);
+            white-space: nowrap;
+        }
+
+        /* ==========================================================================
+           FULL-BLEED INSTRUMENT GRID (NO NESTED CARDS)
+           ========================================================================== */
+        .app-shell {
+            position: relative;
+            z-index: 2;
+            display: flex;
+            flex-direction: column;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* 1. TOP HEADER */
+        .top-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border-hairline);
+            padding: 8px 16px;
+            flex-shrink: 0;
+        }
+
+        .brand-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-shrink: 0;
+        }
+
+        .brand-title {
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            color: var(--text-primary);
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .profile-readout {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--star-gold);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 240px;
+        }
+
+        body.view-simple .top-header #profileSummary {
+            display: none;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+
+        .action-divider {
+            width: 1px;
+            height: 18px;
+            background: var(--border-hairline);
+            margin: 0 4px;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-sans);
+            font-size: 12px;
+            font-weight: 600;
+            padding: 5px 12px;
+            border-radius: 2px;
+            border: 1px solid var(--border-strong);
+            background: var(--bg-elevated);
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+            white-space: nowrap;
+            user-select: none;
+        }
+
+        .btn:hover:not(:disabled) {
+            background: #1f2442;
+            border-color: var(--accent-cyan);
+        }
+
+        .btn:disabled {
+            color: var(--text-muted);
+            background: var(--bg-base);
+            border-color: var(--border-hairline);
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: var(--accent-primary);
+            border-color: rgba(125, 211, 252, 0.45);
+            color: #f8fafc;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #1d4ed8;
+            border-color: var(--accent-cyan);
+        }
+
+        .btn-restart {
+            color: var(--status-online);
+            border-color: rgba(52, 211, 153, 0.35);
+        }
+
+        .btn-restart:hover:not(:disabled) {
+            background: rgba(52, 211, 153, 0.14);
+            border-color: var(--status-online);
+        }
+
+        .btn-stop {
+            color: var(--status-offline);
+            border-color: rgba(248, 113, 113, 0.35);
+        }
+
+        .btn-stop:hover:not(:disabled) {
+            background: rgba(248, 113, 113, 0.14);
+            border-color: var(--status-offline);
+        }
+
+        /* 2. STATUS & NETWORK BAR */
+        .control-strip {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            background: var(--bg-base);
+            border-bottom: 1px solid var(--border-hairline);
+            padding: 6px 16px;
+            flex-shrink: 0;
+            flex-wrap: wrap;
+        }
+
+        .status-group {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            flex-wrap: wrap;
+        }
+
+        .strip-label {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            letter-spacing: 0.02em;
+        }
+
+        .status-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        /* 4-State Thin Circular Status Ring (online / loading / offline / disabled) */
+        .status-ring {
+            width: 14px;
+            height: 14px;
+            flex-shrink: 0;
+            display: inline-block;
+            vertical-align: middle;
+        }
+
+        .status-ring .ring-track {
+            fill: none;
+            stroke-width: 1.5;
+            stroke: var(--text-muted);
+        }
+
+        .status-ring .ring-core {
+            fill: transparent;
+        }
+
+        .status-ring .ring-slash {
+            stroke: transparent;
+            stroke-width: 1.3;
+        }
+
+        @keyframes ring-rotate {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* State 1: ONLINE - Solid emerald ring + solid center core */
+        .status-item[data-state="online"] {
+            color: var(--status-online);
+        }
+        .status-item[data-state="online"] .status-ring .ring-track {
+            stroke: var(--status-online);
+            stroke-dasharray: none;
+        }
+        .status-item[data-state="online"] .status-ring .ring-core {
+            fill: var(--status-online);
+        }
+
+        /* State 2: LOADING - Segmented rotating gold ring + inner gold point */
+        .status-item[data-state="loading"] {
+            color: var(--status-loading);
+        }
+        .status-item[data-state="loading"] .status-ring {
+            animation: ring-rotate 3.2s linear infinite;
+        }
+        .status-item[data-state="loading"] .status-ring .ring-track {
+            stroke: var(--status-loading);
+            stroke-dasharray: 7.5 3.5;
+        }
+        .status-item[data-state="loading"] .status-ring .ring-core {
+            fill: var(--status-loading);
+        }
+
+        /* State 3: OFFLINE - Solid hollow crimson ring (empty center) */
+        .status-item[data-state="offline"] {
+            color: var(--status-offline);
+        }
+        .status-item[data-state="offline"] .status-ring .ring-track {
+            stroke: var(--status-offline);
+            stroke-dasharray: none;
+        }
+
+        /* State 4: DISABLED - Dashed muted slate ring + diagonal slash */
+        .status-item[data-state="disabled"] {
+            color: var(--text-muted);
+        }
+        .status-item[data-state="disabled"] .status-ring .ring-track {
+            stroke: var(--text-muted);
+            stroke-dasharray: 2.5 2.5;
+        }
+        .status-item[data-state="disabled"] .status-ring .ring-slash {
+            stroke: var(--text-muted);
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .status-item[data-state="loading"] .status-ring {
+                animation: none;
+            }
+        }
+
+        .network-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .segmented-group {
+            display: inline-flex;
+            border: 1px solid var(--border-hairline);
+            background: var(--bg-deep);
+        }
+
+        .seg-btn {
+            font-family: var(--font-sans);
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            background: transparent;
+            border: none;
+            border-right: 1px solid var(--border-hairline);
+            padding: 4px 10px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .seg-btn:last-child {
+            border-right: none;
+        }
+
+        .seg-btn:hover {
+            color: var(--text-primary);
+            background: var(--bg-surface);
+        }
+
+        .seg-btn.active {
+            background: var(--accent-primary);
+            color: #f8fafc;
+            font-weight: 600;
+        }
+
+        .chk-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .chk-label.is-disabled {
+            color: var(--text-muted);
+            cursor: not-allowed;
+        }
+
+        .chk-label input[type="checkbox"] {
+            accent-color: var(--accent-cyan);
+            width: 14px;
+            height: 14px;
+            cursor: pointer;
+        }
+
+        .url-box {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--accent-cyan);
+            background: var(--bg-deep);
+            border: 1px solid var(--border-hairline);
+            padding: 4px 10px;
+            width: 260px;
+        }
+
+        /* 3. TELEMETRY 2-COLUMN STRIP */
+        .telemetry-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            border-bottom: 1px solid var(--border-hairline);
+            background: var(--bg-base);
+            flex-shrink: 0;
+        }
+
+        .telemetry-pane {
+            padding: 10px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .telemetry-pane:first-child {
+            border-right: 1px solid var(--border-hairline);
+        }
+
+        .pane-heading {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--accent-cyan);
+            letter-spacing: 0.02em;
+            margin-bottom: 2px;
+        }
+
+        .metric-row {
+            display: grid;
+            grid-template-columns: 140px 1fr;
+            align-items: center;
+            gap: 8px;
+            min-height: 22px;
+        }
+
+        .metric-label {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .metric-val-group {
+            display: flex;
+            align-items: baseline;
+            gap: 10px;
+            min-width: 0;
+            flex-wrap: wrap;
+        }
+
+        .tps-readout {
+            font-family: var(--font-mono);
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--status-online);
+        }
+
+        .prompt-readout {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .mono-val {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .bar-with-text {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+        }
+
+        .mini-progress {
+            width: 84px;
+            height: 5px;
+            background: var(--bg-deep);
+            border: 1px solid var(--border-hairline);
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        .mini-progress-fill {
+            height: 100%;
+            width: 0%;
+            background: var(--accent-cyan);
+            transition: width 0.2s ease;
+        }
+
+        .status-tag {
+            display: inline-flex;
+            align-items: center;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            font-weight: 700;
+            padding: 1px 8px;
+            border: 1px solid var(--border-hairline);
+        }
+
+        .tag-on {
+            color: var(--status-online);
+            border-color: rgba(52, 211, 153, 0.4);
+            background: rgba(52, 211, 153, 0.10);
+        }
+
+        .tag-off {
+            color: var(--text-muted);
+            background: var(--bg-deep);
+        }
+
+        .tag-tts {
+            color: var(--status-violet);
+            border-color: rgba(216, 180, 254, 0.35);
+            background: rgba(216, 180, 254, 0.10);
+        }
+
+        .tts-dialogue-box {
+            font-size: 12px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* 4. RAG COSINE SIMILARITY INSPECTOR (FLAT FULL-WIDTH TABLE) */
+        .rag-section {
+            display: flex;
+            flex-direction: column;
+            border-bottom: 1px solid var(--border-hairline);
+            background: var(--bg-deep);
+            flex-shrink: 0;
+        }
+
+        .section-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 6px 16px;
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border-hairline);
+        }
+
+        .section-bar-left {
+            display: flex;
+            align-items: baseline;
+            gap: 14px;
+            min-width: 0;
+        }
+
+        .rag-summary-text {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .table-scroll {
+            height: 148px;
+            overflow-y: auto;
+            padding: 0 8px;
+        }
+
+        table.rag-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        table.rag-table thead th {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            background: var(--bg-surface);
+            color: var(--text-secondary);
+            font-weight: 600;
+            font-size: 12px;
+            text-align: left;
+            padding: 5px 16px;
+            border-bottom: 1px solid var(--border-hairline);
+            white-space: nowrap;
+            user-select: none;
+        }
+
+        table.rag-table tbody tr {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            cursor: pointer;
+        }
+
+        table.rag-table tbody tr:hover {
+            background: rgba(125, 211, 252, 0.08);
+        }
+
+        table.rag-table tbody tr.selected {
+            background: rgba(37, 99, 235, 0.25);
+        }
+
+        table.rag-table td {
+            padding: 5px 16px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 480px;
+        }
+
+        .row-adopted-top {
+            color: var(--status-online);
+            background: rgba(52, 211, 153, 0.06);
+        }
+        .row-adopted {
+            color: #a7f3d0;
+        }
+        .row-worldline {
+            color: var(--status-loading);
+        }
+        .row-rejected {
+            color: var(--text-muted);
+        }
+
+        .sim-cell {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-family: var(--font-mono);
+        }
+
+        .sim-bar-bg {
+            width: 48px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.10);
+            overflow: hidden;
+        }
+
+        .sim-bar-fill {
+            height: 100%;
+            background: var(--accent-cyan);
+        }
+
+        .cat-pill {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .cat-EPISODE { color: var(--accent-cyan); }
+        .cat-FACT { color: var(--status-loading); }
+        .cat-WEB { color: var(--status-violet); }
+
+        .rag-detail-bar {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--text-secondary);
+            background: var(--bg-base);
+            border-top: 1px solid var(--border-hairline);
+            padding: 6px 16px;
+            max-height: 56px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        /* 5. CONSOLE LOG VIEWER (EDGE-TO-EDGE BOTTOM PANE) */
+        .console-section {
+            flex: 1;
+            min-height: 180px;
+            display: flex;
+            flex-direction: column;
+            background: var(--bg-deep);
+        }
+
+        .console-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 0 16px;
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border-hairline);
+            flex-shrink: 0;
+            flex-wrap: wrap;
+        }
+
+        .tab-bar {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+        }
+
+        .tab-btn {
+            font-family: var(--font-sans);
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid transparent;
+            padding: 8px 12px 6px 12px;
+            cursor: pointer;
+            user-select: none;
+            transition: color 0.15s ease, border-color 0.15s ease;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-primary);
+        }
+
+        .tab-btn.active {
+            color: var(--star-gold);
+            border-bottom-color: var(--star-gold);
+        }
+
+        .console-controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 4px 0;
+        }
+
+        .filter-input {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--text-primary);
+            background: var(--bg-deep);
+            border: 1px solid var(--border-hairline);
+            padding: 4px 10px;
+            width: 190px;
+        }
+
+        .filter-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .console-viewport {
+            flex: 1;
+            padding: 8px 16px;
+            overflow-y: auto;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .log-line {
+            white-space: pre-wrap;
+            word-break: break-all;
+            padding: 1px 0;
+        }
+
+        .log-ts {
+            color: var(--text-muted);
+            margin-right: 8px;
+        }
+
+        .log-badge {
+            display: inline-block;
+            font-size: 12px;
+            font-weight: 700;
+            margin-right: 8px;
+        }
+
+        .src-llm { color: var(--accent-cyan); }
+        .src-flask { color: var(--status-online); }
+        .src-tts { color: var(--status-loading); }
+        .src-gw { color: var(--status-violet); }
+        .src-sys { color: var(--text-primary); }
+        .src-err {
+            color: var(--status-offline);
+            background: rgba(248, 113, 113, 0.12);
+        }
+
+        /* ==========================================================================
+           VIEW MODE SWITCHER (SIMPLE / BEGINNER VS DETAILED TELEMETRY)
+           ========================================================================== */
+        body.view-simple #simpleView {
+            display: flex;
+        }
+        body.view-simple #detailedView {
+            display: none !important;
+        }
+        body.view-detailed #simpleView {
+            display: none !important;
+        }
+        body.view-detailed #detailedView {
+            display: flex;
+        }
+
+        .detailed-view {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            overflow: hidden;
+        }
+
+        /* 5.5 SIMPLE / BEGINNER DASHBOARD VIEW */
+        .simple-view {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            padding: 24px 20px;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .simple-panel {
+            max-width: 860px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .simple-hero-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-hairline);
+            padding: 22px 26px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .hero-headline-group {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .hero-status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-family: var(--font-mono);
+            font-size: 14px;
+            font-weight: 700;
+            padding: 4px 12px;
+            border: 1px solid var(--border-hairline);
+            background: var(--bg-elevated);
+        }
+
+        .hero-status-pill[data-cluster="online"] {
+            color: var(--status-online);
+            border-color: rgba(52, 211, 153, 0.4);
+            background: rgba(52, 211, 153, 0.08);
+        }
+
+        .hero-status-pill[data-cluster="loading"] {
+            color: var(--status-loading);
+            border-color: rgba(253, 230, 138, 0.4);
+            background: rgba(253, 230, 138, 0.08);
+        }
+
+        .hero-status-pill[data-cluster="offline"] {
+            color: var(--status-offline);
+            border-color: rgba(248, 113, 113, 0.4);
+            background: rgba(248, 113, 113, 0.08);
+        }
+
+        .hero-desc {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        .hero-cta-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 4px;
+        }
+
+        .btn-hero-launch {
+            font-size: 14px;
+            font-weight: 700;
+            padding: 9px 22px;
+        }
+
+        .simple-nodes-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+        }
+
+        .simple-node-tile {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-hairline);
+            padding: 10px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .simple-node-label {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .simple-node-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .simple-node-tile[data-state="online"] .simple-node-status {
+            color: var(--status-online);
+        }
+        .simple-node-tile[data-state="loading"] .simple-node-status {
+            color: var(--status-loading);
+        }
+        .simple-node-tile[data-state="offline"] .simple-node-status {
+            color: var(--status-offline);
+        }
+        .simple-node-tile[data-state="disabled"] .simple-node-status {
+            color: var(--text-muted);
+        }
+
+        .simple-network-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-hairline);
+            padding: 14px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .card-header-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .simple-card-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--accent-cyan);
+            letter-spacing: 0.02em;
+        }
+
+        .simple-dev-hint-card {
+            background: var(--bg-deep);
+            border: 1px solid var(--border-hairline);
+            padding: 12px 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .dev-hint-text {
+            font-size: 12px;
+            color: var(--text-secondary);
+            line-height: 1.45;
+        }
+
+        /* 6. MODALS & TOAST */
+        .modal-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(6, 7, 14, 0.80);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+
+        .modal-backdrop.open {
+            display: flex;
+        }
+
+        .modal-box {
+            position: relative;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-strong);
+            width: 540px;
+            max-width: 92vw;
+            max-height: 86vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.65);
+        }
+
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border-hairline);
+        }
+
+        .modal-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--accent-cyan);
+        }
+
+        .modal-body {
+            padding: 16px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .modal-footer {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 8px;
+            padding: 10px 16px;
+            background: var(--bg-base);
+            border-top: 1px solid var(--border-hairline);
+        }
+
+        .qr-svg-container {
+            background: #f8fafc;
+            padding: 14px;
+            align-self: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 220px;
+            min-height: 220px;
+        }
+
+        .form-row {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .form-row label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .form-input, .form-select {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--text-primary);
+            background: var(--bg-deep);
+            border: 1px solid var(--border-strong);
+            padding: 6px 10px;
+        }
+
+        .doctor-output {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            line-height: 1.55;
+            background: var(--bg-deep);
+            border: 1px solid var(--border-hairline);
+            padding: 12px;
+            white-space: pre-wrap;
+            max-height: 360px;
+            overflow-y: auto;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 16px;
+            right: 16px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--accent-cyan);
+            color: var(--text-primary);
+            padding: 8px 14px;
+            font-size: 12px;
+            font-weight: 600;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+            opacity: 0;
+            transform: translateY(8px);
+            pointer-events: none;
+            transition: opacity 0.18s ease, transform 0.18s ease;
+            z-index: 200;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    </style>
+</head>
+<body class="view-simple">
+    <!-- CELESTIAL CORNER RETICLES (splash.html motif) -->
+    <div class="reticle reticle-tl" aria-hidden="true"></div>
+    <div class="reticle reticle-tr" aria-hidden="true"></div>
+    <div class="reticle reticle-bl" aria-hidden="true"></div>
+    <div class="reticle reticle-br" aria-hidden="true"></div>
+
+    <!-- ASTROLABE CONCENTRIC HAIRLINES WATERMARK (splash.html motif) -->
+    <svg class="astrolabe-watermark" viewBox="0 0 600 600" aria-hidden="true">
+        <circle cx="300" cy="300" r="280" stroke="rgba(255, 255, 255, 0.05)" stroke-width="1" fill="none"></circle>
+        <circle cx="300" cy="300" r="272" stroke="rgba(253, 230, 138, 0.10)" stroke-width="1" stroke-dasharray="3 6" fill="none"></circle>
+        <line x1="300" y1="10" x2="300" y2="26" stroke="rgba(253, 230, 138, 0.32)" stroke-width="1.5"></line>
+        <line x1="300" y1="574" x2="300" y2="590" stroke="rgba(253, 230, 138, 0.32)" stroke-width="1.5"></line>
+        <line x1="10" y1="300" x2="26" y2="300" stroke="rgba(253, 230, 138, 0.32)" stroke-width="1.5"></line>
+        <line x1="574" y1="300" x2="590" y2="300" stroke="rgba(253, 230, 138, 0.32)" stroke-width="1.5"></line>
+        <circle cx="300" cy="300" r="205" stroke="rgba(125, 211, 252, 0.08)" stroke-width="1" stroke-dasharray="8 8" fill="none"></circle>
+        <circle cx="300" cy="300" r="135" stroke="rgba(255, 255, 255, 0.045)" stroke-width="1" fill="none"></circle>
+        <circle cx="300" cy="300" r="68" stroke="rgba(253, 230, 138, 0.07)" stroke-width="1" fill="none"></circle>
+    </svg>
+
+    <div class="app-shell">
+        <!-- 1. TOP HEADER -->
+        <header class="top-header">
+            <div class="brand-group">
+                <span class="obs-seal">DEINEI CORE</span>
+                <h1 class="brand-title"><span class="slash-accent">//</span>泥濘 (Deinei) RUNTIME CONSOLE</h1>
+                <div class="profile-readout" id="profileSummary">プロファイル読込中...</div>
+            </div>
+            <div class="header-actions">
+                <div class="segmented-group" id="viewModeSelector" role="group" aria-label="表示モード切替">
+                    <button class="seg-btn active" id="btnModeSimple" onclick="switchViewMode('simple')">シンプル</button>
+                    <button class="seg-btn" id="btnModeDetailed" onclick="switchViewMode('detailed')">詳細コンソール</button>
+                </div>
+                <div class="action-divider"></div>
+                <button class="btn btn-primary" onclick="onOpenWebUI()">WebUI (8080)</button>
+                <div class="action-divider"></div>
+                <button class="btn" onclick="openDoctorModal()">Doctor診断</button>
+                <button class="btn" onclick="openProfileModal()">プロファイル</button>
+                <div class="action-divider"></div>
+                <button class="btn btn-restart" id="btnRestartServers" onclick="onRestartServers()">起動 / 再起動</button>
+                <button class="btn btn-stop" id="btnStopServers" onclick="onStopServers()">全停止</button>
+            </div>
+        </header>
+
+        <!-- 2. SIMPLE / BEGINNER-FRIENDLY VIEW (DEFAULT) -->
+        <main class="simple-view" id="simpleView">
+            <div class="simple-panel">
+                <!-- HERO CLUSTER STATUS & PRIMARY ACTION -->
+                <div class="simple-hero-card">
+                    <div class="hero-headline-group">
+                        <div class="hero-status-pill" id="simpleHeroStatusPill" data-cluster="offline">
+                            <span class="status-item" id="simpleHeroStatusItem" data-state="offline" style="display: inline-flex; align-items: center; gap: 7px;">
+                                <svg class="status-ring" id="simpleClusterStatusRing" viewBox="0 0 16 16" aria-hidden="true">
+                                    <circle class="ring-track" cx="8" cy="8" r="6"></circle>
+                                    <circle class="ring-core" cx="8" cy="8" r="2.2"></circle>
+                                    <line class="ring-slash" x1="4" y1="12" x2="12" y2="4"></line>
+                                </svg>
+                            </span>
+                            <span id="simpleClusterStatusText">AI サーバー準備中...</span>
+                        </div>
+                        <div class="profile-readout" id="simpleProfileReadout">プロファイル読込中...</div>
+                    </div>
+                    <p class="hero-desc" id="simpleClusterStatusDesc">
+                        ローカルAIサーバーの起動状況を確認しています。起動が完了すると「WebUI を開く」ボタンで会話を開始できます。
+                    </p>
+                    <div class="hero-cta-row">
+                        <button class="btn btn-primary btn-hero-launch" id="btnHeroOpenWebUI" onclick="onOpenWebUI()">WebUI を開いて会話する (ブラウザ起動 · 8080)</button>
+                        <button class="btn btn-restart" onclick="onRestartServers()">全サーバー再起動</button>
+                        <button class="btn btn-stop" onclick="onStopServers()">全サーバー停止</button>
+                    </div>
+                </div>
+
+                <!-- 4 SERVER NODES STATUS OVERVIEW -->
+                <div class="simple-nodes-grid">
+                    <div class="simple-node-tile" id="simple-badge-llm" data-state="offline">
+                        <span class="simple-node-label">// NODE 01 : LLM推論 (:8080)</span>
+                        <div class="simple-node-status">
+                            <svg class="status-ring" viewBox="0 0 16 16" aria-hidden="true">
+                                <circle class="ring-track" cx="8" cy="8" r="6"></circle>
+                                <circle class="ring-core" cx="8" cy="8" r="2.2"></circle>
+                                <line class="ring-slash" x1="4" y1="12" x2="12" y2="4"></line>
+                            </svg>
+                            <span id="simple-badge-text-llm">LLM: OFFLINE</span>
+                        </div>
+                    </div>
+                    <div class="simple-node-tile" id="simple-badge-flask" data-state="offline">
+                        <span class="simple-node-label">// NODE 02 : Data / RAG (:5000)</span>
+                        <div class="simple-node-status">
+                            <svg class="status-ring" viewBox="0 0 16 16" aria-hidden="true">
+                                <circle class="ring-track" cx="8" cy="8" r="6"></circle>
+                                <circle class="ring-core" cx="8" cy="8" r="2.2"></circle>
+                                <line class="ring-slash" x1="4" y1="12" x2="12" y2="4"></line>
+                            </svg>
+                            <span id="simple-badge-text-flask">Data: OFFLINE</span>
+                        </div>
+                    </div>
+                    <div class="simple-node-tile" id="simple-badge-tts" data-state="offline">
+                        <span class="simple-node-label">// NODE 03 : TTS音声合成 (:5001)</span>
+                        <div class="simple-node-status">
+                            <svg class="status-ring" viewBox="0 0 16 16" aria-hidden="true">
+                                <circle class="ring-track" cx="8" cy="8" r="6"></circle>
+                                <circle class="ring-core" cx="8" cy="8" r="2.2"></circle>
+                                <line class="ring-slash" x1="4" y1="12" x2="12" y2="4"></line>
+                            </svg>
+                            <span id="simple-badge-text-tts">TTS: OFFLINE</span>
+                        </div>
+                    </div>
+                    <div class="simple-node-tile" id="simple-badge-gw" data-state="disabled">
+                        <span class="simple-node-label">// NODE 04 : Gateway外部公開 (:8090)</span>
+                        <div class="simple-node-status">
+                            <svg class="status-ring" viewBox="0 0 16 16" aria-hidden="true">
+                                <circle class="ring-track" cx="8" cy="8" r="6"></circle>
+                                <circle class="ring-core" cx="8" cy="8" r="2.2"></circle>
+                                <line class="ring-slash" x1="4" y1="12" x2="12" y2="4"></line>
+                            </svg>
+                            <span id="simple-badge-text-gw">Gateway: DISABLED</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ACCESS & SMARTPHONE CONNECTIVITY CARD -->
+                <div class="simple-network-card">
+                    <div class="card-header-bar">
+                        <span class="simple-card-title"><span class="slash-accent">//</span>接続先 &amp; スマートフォン連携</span>
+                        <span class="strip-label">同じWi-Fi内のスマホ・他PCから接続可能</span>
+                    </div>
+                    <div class="network-group">
+                        <span class="strip-label">公開モード:</span>
+                        <div class="segmented-group" id="simpleModeSelector" role="group" aria-label="公開モード切替（シンプル画面）">
+                            <button class="seg-btn active" data-mode="local" onclick="selectNetworkMode('local')">ローカルのみ</button>
+                            <button class="seg-btn" data-mode="lan" onclick="selectNetworkMode('lan')">LAN 公開</button>
+                            <button class="seg-btn" data-mode="tailscale" onclick="selectNetworkMode('tailscale')">Tailscale 公開</button>
+                        </div>
+                        <label class="chk-label is-disabled" id="simpleLblTailscaleHttps">
+                            <input type="checkbox" id="simpleChkTailscaleHttps" disabled onchange="onHttpsToggled()">
+                            <span>Tailscale HTTPS</span>
+                        </label>
+                        <input type="text" class="url-box" id="simpleGatewayUrlInput" aria-label="接続URL" readonly value="http://127.0.0.1:8080 (ローカル専用)">
+                        <button class="btn" onclick="copyGatewayUrl()">URLコピー</button>
+                        <button class="btn" id="simpleBtnShowQr" disabled onclick="openQrModal()">QRコード表示</button>
+                    </div>
+                </div>
+
+                <!-- DEVELOPER / TELEMETRY SWITCH HINT -->
+                <div class="simple-dev-hint-card">
+                    <div class="dev-hint-text">
+                        <span class="slash-accent">//</span>詳細情報: 生成速度 (TPS)、KVキャッシュ再利用率、RAGコサイン類似度、各サーバーのリアルタイムログの確認や、Visionエンコーダ (--mmproj) のオン/オフ、MoE CPU退避数 (-ncmoe) 変更などの拡張機能を利用したい場合は「詳細コンソール」に切り替えてください。
+                    </div>
+                    <button class="btn" onclick="switchViewMode('detailed')">詳細コンソールを開く &rarr;</button>
+                </div>
+            </div>
+        </main>
+
+        <!-- 3. DETAILED TELEMETRY & CONSOLE VIEW -->
+        <div class="detailed-view" id="detailedView">
+            <!-- 2. STATUS & NETWORK STRIP -->
+            <section class="control-strip">
+                <div class="status-group">
+                    <span class="strip-label"><span class="slash-accent">//</span>NODES:</span>
+                    <div class="status-item" id="badge-llm" data-state="offline">
+                        <svg class="status-ring" viewBox="0 0 16 16" aria-hidden="true">
+                            <circle class="ring-track" cx="8" cy="8" r="6"></circle>
+                            <circle class="ring-core" cx="8" cy="8" r="2.2"></circle>
+                            <line class="ring-slash" x1="4" y1="12" x2="12" y2="4"></line>
+                        </svg>
+                        <span id="badge-text-llm">LLM (8080): OFFLINE</span>
+                    </div>
+                    <div class="status-item" id="badge-flask" data-state="offline">
+                        <svg class="status-ring" viewBox="0 0 16 16" aria-hidden="true">
+                            <circle class="ring-track" cx="8" cy="8" r="6"></circle>
+                            <circle class="ring-core" cx="8" cy="8" r="2.2"></circle>
+                            <line class="ring-slash" x1="4" y1="12" x2="12" y2="4"></line>
+                        </svg>
+                        <span id="badge-text-flask">Data/RAG (5000): OFFLINE</span>
+                    </div>
+                    <div class="status-item" id="badge-tts" data-state="offline">
+                        <svg class="status-ring" viewBox="0 0 16 16" aria-hidden="true">
+                            <circle class="ring-track" cx="8" cy="8" r="6"></circle>
+                            <circle class="ring-core" cx="8" cy="8" r="2.2"></circle>
+                            <line class="ring-slash" x1="4" y1="12" x2="12" y2="4"></line>
+                        </svg>
+                        <span id="badge-text-tts">TTS (5001): OFFLINE</span>
+                    </div>
+                    <div class="status-item" id="badge-gw" data-state="disabled">
+                        <svg class="status-ring" viewBox="0 0 16 16" aria-hidden="true">
+                            <circle class="ring-track" cx="8" cy="8" r="6"></circle>
+                            <circle class="ring-core" cx="8" cy="8" r="2.2"></circle>
+                            <line class="ring-slash" x1="4" y1="12" x2="12" y2="4"></line>
+                        </svg>
+                        <span id="badge-text-gw">Gateway (8090): DISABLED</span>
+                    </div>
+                </div>
+
+                <div class="network-group">
+                    <span class="strip-label"><span class="slash-accent">//</span>GATEWAY:</span>
+                    <div class="segmented-group" id="modeSelector" role="group" aria-label="公開モード切替">
+                        <button class="seg-btn active" data-mode="local" onclick="selectNetworkMode('local')">ローカルのみ</button>
+                        <button class="seg-btn" data-mode="lan" onclick="selectNetworkMode('lan')">LAN 公開</button>
+                        <button class="seg-btn" data-mode="tailscale" onclick="selectNetworkMode('tailscale')">Tailscale 公開</button>
+                    </div>
+                    <label class="chk-label is-disabled" id="lblTailscaleHttps">
+                        <input type="checkbox" id="chkTailscaleHttps" disabled onchange="onHttpsToggled()">
+                        <span>Tailscale HTTPS</span>
+                    </label>
+                    <input type="text" class="url-box" id="gatewayUrlInput" aria-label="接続URL" readonly value="http://127.0.0.1:8080 (ローカル専用)">
+                    <button class="btn" onclick="copyGatewayUrl()">URLコピー</button>
+                    <button class="btn" id="btnShowQr" disabled onclick="openQrModal()">QRコード表示</button>
+                </div>
+            </section>
+
+            <!-- 3. TELEMETRY 2-COLUMN STRIP -->
+            <section class="telemetry-grid">
+                <div class="telemetry-pane">
+                    <div class="pane-heading"><span class="slash-accent">//</span>TELEMETRY_01 : LLM 推論速度 &amp; KVキャッシュ再利用メトリクス</div>
+                    <div class="metric-row">
+                        <span class="metric-label">生成速度 (TPS):</span>
+                        <div class="metric-val-group">
+                            <span class="tps-readout" id="metricTps">--.-- t/s</span>
+                            <span class="prompt-readout" id="metricPromptEval">Prompt: -- ms (-- tok)</span>
+                        </div>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">コンテキスト使用量:</span>
+                        <div class="bar-with-text">
+                            <div class="mini-progress">
+                                <div class="mini-progress-fill" id="ctxBarFill" style="width: 0%;"></div>
+                            </div>
+                            <span class="mono-val" id="metricCtx">0 / 16,384 tok (0.0%)</span>
+                        </div>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">KVキャッシュ再利用:</span>
+                        <div class="bar-with-text">
+                            <div class="mini-progress">
+                                <div class="mini-progress-fill" id="kvBarFill" style="width: 0%;"></div>
+                            </div>
+                            <span class="mono-val" id="metricKvReuse" style="color: var(--accent-cyan);">待機中 (初回発話後に計測)</span>
+                        </div>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">プレフィックス差分:</span>
+                        <span class="mono-val" id="metricKvMismatch" style="color: var(--text-secondary); font-weight: 400;">食い違い位置: -</span>
+                    </div>
+                </div>
+
+                <div class="telemetry-pane">
+                    <div class="pane-heading"><span class="slash-accent">//</span>TELEMETRY_02 : Web検索ツール &amp; TTS 音声合成ステータス</div>
+                    <div class="metric-row">
+                        <span class="metric-label">Web検索トグル状態:</span>
+                        <div>
+                            <span class="status-tag tag-on" id="metricSearchToggle">ON</span>
+                        </div>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">直近の検索キーワード:</span>
+                        <span class="mono-val" id="metricSearchQuery" style="color: var(--status-loading);">(未実行)</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">TTS 合成状態:</span>
+                        <div>
+                            <span class="status-tag tag-tts" id="metricTtsState">待機中</span>
+                        </div>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">直近の読み上げセリフ:</span>
+                        <div class="tts-dialogue-box" id="metricTtsText">(まだ読み上げられたセリフはありません)</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 4. RAG COSINE SIMILARITY INSPECTOR -->
+            <section class="rag-section">
+                <div class="section-bar">
+                    <div class="section-bar-left">
+                        <span class="pane-heading" style="margin-bottom: 0;"><span class="slash-accent">//</span>MEMORY_RAG : 記憶検索 &amp; 親子リトリーバル コサイン類似度インスペクター</span>
+                        <span class="rag-summary-text" id="ragSummaryText">クエリ: (未実行) | コレクション総数: - | 採用: Episode 0件 / Fact 0件</span>
+                    </div>
+                    <button class="btn" onclick="onClearRagTable()">履歴クリア</button>
+                </div>
+                <div class="table-scroll">
+                    <table class="rag-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 130px;">判定 / 順位</th>
+                                <th style="width: 90px;">記憶種別</th>
+                                <th style="width: 150px;">コサイン類似度</th>
+                                <th style="width: 100px;">コサイン距離</th>
+                                <th style="width: 170px;">検索キー (子要素)</th>
+                                <th>記憶テキスト / 親エピソード抜粋</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ragTableBody">
+                            <tr>
+                                <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 28px 16px;">
+                                    会話が実行されると、ChromaDB のコサイン類似度計算結果と親子リトリーバルの採否がここに一覧表示されます。
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="rag-detail-bar" id="ragDetailBar">
+                    テーブルの行をクリックまたは Enter キーで選択すると、ここに検索キーと記憶・親エピソードの全文プレビューが表示されます。
+                </div>
+            </section>
+
+            <!-- 5. TABBED CONSOLE VIEWER -->
+            <section class="console-section">
+                <div class="console-toolbar">
+                    <div class="tab-bar" id="logTabBar" role="tablist">
+                        <span class="strip-label" style="margin-right: 8px;"><span class="slash-accent">//</span>STREAM_LOG</span>
+                        <button class="tab-btn active" role="tab" data-tab="all" onclick="switchLogTab('all')">統合イベント (All)</button>
+                        <button class="tab-btn" role="tab" data-tab="llm" onclick="switchLogTab('llm')">LLM Server (8080)</button>
+                        <button class="tab-btn" role="tab" data-tab="flask" onclick="switchLogTab('flask')">Data / RAG (5000)</button>
+                        <button class="tab-btn" role="tab" data-tab="tts" onclick="switchLogTab('tts')">TTS Server (5001)</button>
+                        <button class="tab-btn" role="tab" data-tab="gw" onclick="switchLogTab('gw')">Gateway (8090)</button>
+                    </div>
+                    <div class="console-controls">
+                        <input type="text" class="filter-input" id="logKeywordFilter" aria-label="ログ内キーワード絞り込み" placeholder="ログ内キーワード絞り込み..." oninput="renderActiveLogTab()">
+                        <label class="chk-label">
+                            <input type="checkbox" id="chkNoiseFilter" checked onchange="renderActiveLogTab()">
+                            <span>ノイズログ除外 (/health・静的GET等)</span>
+                        </label>
+                        <label class="chk-label">
+                            <input type="checkbox" id="chkAutoScroll" checked>
+                            <span>自動スクロール</span>
+                        </label>
+                        <button class="btn" onclick="clearCurrentLogTab()">表示タブのログをクリア</button>
+                    </div>
+                </div>
+                <div class="console-viewport" id="consoleViewport"></div>
+            </section>
+        </div>
+    </div>
+
+    <!-- MODAL: QR CODE -->
+    <div class="modal-backdrop" id="qrModal" role="dialog" aria-modal="true" onclick="onBackdropClick(event, 'qrModal')">
+        <div class="modal-box" style="width: 420px;">
+            <div class="modal-header">
+                <span class="modal-title"><span class="slash-accent">//</span>スマートフォン接続用 QRコード</span>
+                <button class="btn" onclick="closeModal('qrModal')">閉じる</button>
+            </div>
+            <div class="modal-body" style="align-items: center; text-align: center;">
+                <p style="color: var(--text-secondary); font-size: 12px;">スマートフォンのカメラで読み取って WebUI にアクセスしてください</p>
+                <div class="qr-svg-container" id="qrSvgHolder"></div>
+                <input type="text" class="url-box" id="qrModalUrl" aria-label="QRコードURL" readonly style="width: 100%; text-align: center;">
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: DOCTOR -->
+    <div class="modal-backdrop" id="doctorModal" role="dialog" aria-modal="true" onclick="onBackdropClick(event, 'doctorModal')">
+        <div class="modal-box" style="width: 680px;">
+            <div class="modal-header">
+                <span class="modal-title"><span class="slash-accent">//</span>Deinei Doctor ネットワーク・接続診断</span>
+                <button class="btn" onclick="closeModal('doctorModal')">閉じる</button>
+            </div>
+            <div class="modal-body">
+                <div class="doctor-output" id="doctorOutput" aria-live="polite">[INFO] 診断を実行しています...</div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="runDoctorChecks()">再診断を実行</button>
+                <button class="btn" onclick="closeModal('doctorModal')">閉じる</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: PROFILE SETTINGS -->
+    <div class="modal-backdrop" id="profileModal" role="dialog" aria-modal="true" onclick="onBackdropClick(event, 'profileModal')">
+        <div class="modal-box" style="width: 480px;">
+            <div class="modal-header">
+                <span class="modal-title"><span class="slash-accent">//</span>ハードウェアプロファイル設定 (deining_profile.bat)</span>
+                <button class="btn" onclick="closeModal('profileModal')">閉じる</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <label for="profPreset">VRAM プロファイルプリセット</label>
+                    <select class="form-select" id="profPreset" onchange="onPresetChange()">
+                        <option value="24GB (Ultra)">24GB (Ultra) - ncmoe: 0 / Vision: ON</option>
+                        <option value="16GB (High)">16GB (High) - ncmoe: 9 / Vision: OFF</option>
+                        <option value="12GB (Medium)">12GB (Medium) - ncmoe: 16 / Vision: OFF</option>
+                        <option value="8GB (Low/Medium)">8GB (Low/Medium) - ncmoe: 20 / Vision: OFF</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label for="profNcmoe">MoE CPU オフロード層数 (-ncmoe) [0 〜 48]</label>
+                    <input type="number" class="form-input" id="profNcmoe" min="0" max="48" value="9">
+                </div>
+                <div class="form-row" style="margin-top: 4px;">
+                    <label class="chk-label">
+                        <input type="checkbox" id="profVision">
+                        <span>Vision エンコーダ (mmproj-BF16.gguf) を GPU にロードする</span>
+                    </label>
+                </div>
+                <p style="font-size: 12px; color: var(--text-muted); line-height: 1.5;">
+                    ※保存すると <code>deining_profile.bat</code> が更新されます。変更を LLM サーバーに反映するには「保存してサーバー再起動」を押してください。
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="saveProfile(false)">保存のみ</button>
+                <button class="btn btn-primary" onclick="saveProfile(true)">保存してサーバー再起動</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: TAILSCALE REMOTE SETUP ASSISTANT -->
+    <div class="modal-backdrop" id="tailscaleModal" role="dialog" aria-modal="true" onclick="onBackdropClick(event, 'tailscaleModal')">
+        <div class="modal-box" style="width: 580px;">
+            <div class="modal-header">
+                <span class="modal-title"><span class="slash-accent">//</span>Tailscale リモート連携アシスタント</span>
+                <button class="btn" onclick="closeModal('tailscaleModal')">閉じる</button>
+            </div>
+            <div class="modal-body">
+                <p style="font-size: 13px; color: var(--text-primary); line-height: 1.5; margin: 0;">
+                    Tailscale を使用すると、外出先やスマホのモバイル回線から自宅 PC の泥濘 AI サーバーへ安全に直接アクセスできます。（ルーターのポート開放不要・個人無料）
+                </p>
+
+                <div class="ts-state-box" id="tsStateBox" style="background: var(--bg-deep); border: 1px solid var(--border-hairline); padding: 14px; display: flex; flex-direction: column; gap: 8px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                        <span style="font-size: 12px; font-weight: 700; color: var(--text-secondary); font-family: var(--font-mono);">現在の状態:</span>
+                        <span class="status-tag" id="tsStatusTag">確認中...</span>
+                    </div>
+                    <div id="tsStatusDetail" style="font-size: 12px; color: var(--text-secondary); line-height: 1.5;">
+                        Tailscale の導入状況を確認しています...
+                    </div>
+                    <div id="tsEndpointInfo" style="font-size: 12px; font-family: var(--font-mono); color: var(--star-gold); display: none;"></div>
+                </div>
+
+                <div class="ts-guide-box" style="font-size: 12px; color: var(--text-muted); line-height: 1.6;">
+                    <div><strong>手順 1:</strong> PC に Tailscale をインストール（管理者権限 UAC 許可）</div>
+                    <div><strong>手順 2:</strong> ブラウザで Tailscale アカウントにログインして Connect</div>
+                    <div><strong>手順 3:</strong> スマホでも同じアカウントで Tailscale アプリを起動し、QRコードを読み取る</div>
+                </div>
+            </div>
+            <div class="modal-footer" id="tsModalFooter">
+                <button class="btn btn-primary" id="btnTsInstall" onclick="onTsInstallClick()">Tailscale をインストール (UAC)</button>
+                <button class="btn btn-primary" id="btnTsLogin" style="display: none;" onclick="onTsLoginClick()">ブラウザでログイン画面を開く</button>
+                <button class="btn" onclick="closeModal('tailscaleModal')">閉じる</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toastMsg" role="status" aria-live="polite"></div>
+
+    <script>
+        let lastLogSeq = 0;
+        let currentRagVersion = -1;
+        let activeTab = 'all';
+        let logsByTab = { all: [], llm: [], flask: [], tts: [], gw: [] };
+        let ragRowsCache = [];
+        let selectedRagIdx = -1;
+        let currentMode = 'local';
+
+        let currentViewMode = 'simple';
+
+        function switchViewMode(mode) {
+            currentViewMode = mode;
+            document.body.classList.toggle('view-simple', mode === 'simple');
+            document.body.classList.toggle('view-detailed', mode === 'detailed');
+            const btnS = document.getElementById('btnModeSimple');
+            const btnD = document.getElementById('btnModeDetailed');
+            if (btnS) btnS.classList.toggle('active', mode === 'simple');
+            if (btnD) btnD.classList.toggle('active', mode === 'detailed');
+            if (mode === 'detailed') {
+                renderActiveLogTab();
+            }
+        }
+
+        function showToast(msg) {
+            const el = document.getElementById('toastMsg');
+            el.textContent = msg;
+            el.classList.add('show');
+            clearTimeout(window._toastTimer);
+            window._toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('open');
+            if (id === 'tailscaleModal' && tsPollTimer) {
+                clearInterval(tsPollTimer);
+                tsPollTimer = null;
+            }
+        }
+
+        function onBackdropClick(event, id) {
+            if (event.target === event.currentTarget) {
+                closeModal(id);
+            }
+        }
+
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+                document.querySelectorAll('.modal-backdrop.open').forEach(el => el.classList.remove('open'));
+                if (tsPollTimer) {
+                    clearInterval(tsPollTimer);
+                    tsPollTimer = null;
+                }
+            }
+        });
+
+        function escapeHtml(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        let tsPollTimer = null;
+
+        async function checkAndOpenTailscaleModal() {
+            document.getElementById('tailscaleModal').classList.add('open');
+            await refreshTailscaleModalState();
+            if (tsPollTimer) clearInterval(tsPollTimer);
+            tsPollTimer = setInterval(refreshTailscaleModalState, 2000);
+        }
+
+        async function refreshTailscaleModalState() {
+            if (!window.pywebview || !window.pywebview.api) return;
+            try {
+                const ts = await window.pywebview.api.get_tailscale_status();
+                const tag = document.getElementById('tsStatusTag');
+                const detail = document.getElementById('tsStatusDetail');
+                const ep = document.getElementById('tsEndpointInfo');
+                const btnInstall = document.getElementById('btnTsInstall');
+                const btnLogin = document.getElementById('btnTsLogin');
+
+                if (!ts.installed) {
+                    tag.textContent = '未インストール';
+                    tag.className = 'status-tag tag-off';
+                    detail.textContent = 'Tailscale がこの PC にインストールされていません。下のボタンを押すと公式インストーラーをダウンロードし、管理者権限（UAC）で起動します。';
+                    ep.style.display = 'none';
+                    btnInstall.style.display = 'inline-flex';
+                    btnInstall.disabled = false;
+                    btnInstall.textContent = 'Tailscale をインストール (UAC)';
+                    btnLogin.style.display = 'none';
+                } else if (!ts.running) {
+                    const isNeedsLogin = (ts.backend_state === 'NeedsLogin' || ts.backend_state === 'Stopped');
+                    tag.textContent = isNeedsLogin ? 'ログイン認証待ち' : '未接続';
+                    tag.className = 'status-tag tag-off';
+                    detail.textContent = 'Tailscale はインストール済みですが、アカウントのログイン認証が完了していません。「ブラウザでログイン画面を開く」を押してログインを完了してください。';
+                    ep.style.display = 'none';
+                    btnInstall.style.display = 'none';
+                    btnLogin.style.display = 'inline-flex';
+                    btnLogin.disabled = false;
+                } else {
+                    tag.textContent = '接続完了 (ONLINE)';
+                    tag.className = 'status-tag tag-on';
+                    detail.textContent = 'Tailscale ネットワークに正常に接続されています。スマートフォン側でも同じ Tailscale アカウントでログインすると外出先からアクセスできます。';
+                    ep.style.display = 'block';
+                    ep.textContent = `Tailscale IPv4: ${ts.ip || '-'}  |  MagicDNS: ${ts.dns_name || '未構成'}`;
+                    btnInstall.style.display = 'none';
+                    btnLogin.style.display = 'none';
+                }
+            } catch (e) {
+                // bridge transient error
+            }
+        }
+
+        async function onTsInstallClick() {
+            const btn = document.getElementById('btnTsInstall');
+            btn.disabled = true;
+            btn.textContent = 'インストーラー起動中...';
+            document.getElementById('tsStatusDetail').textContent = '公式インストーラーをダウンロードしています。画面に Windows の『このアプリがデバイスに変更を加えることを許可しますか？（UAC）』が出たら『はい』を押してください。';
+            if (window.pywebview && window.pywebview.api) {
+                await window.pywebview.api.install_tailscale();
+                showToast('[INFO] Tailscale インストーラーを起動しました。UACを許可してください');
+            }
+        }
+
+        async function onTsLoginClick() {
+            const btn = document.getElementById('btnTsLogin');
+            btn.disabled = true;
+            btn.textContent = 'ブラウザ起動中...';
+            document.getElementById('tsStatusDetail').textContent = '既定のブラウザで Tailscale ログイン画面を開いています。ブラウザ上でサインインし、「Connect」を完了してください... (自動監視中)';
+            if (window.pywebview && window.pywebview.api) {
+                await window.pywebview.api.login_tailscale();
+                showToast('[INFO] ブラウザで Tailscale ログイン画面を開きました');
+            }
+            setTimeout(() => {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = 'ブラウザでログイン画面を開く';
+                }
+            }, 3000);
+        }
+
+        function updateModeButtonsUI(mode, httpsEnabled) {
+            currentMode = mode;
+            document.querySelectorAll('#modeSelector .seg-btn, #simpleModeSelector .seg-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.mode === mode);
+            });
+            const isTailscale = (mode === 'tailscale');
+            ['chkTailscaleHttps', 'simpleChkTailscaleHttps'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.checked = !!httpsEnabled;
+                    el.disabled = !isTailscale;
+                }
+            });
+            ['lblTailscaleHttps', 'simpleLblTailscaleHttps'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.classList.toggle('is-disabled', !isTailscale);
+            });
+            ['btnShowQr', 'simpleBtnShowQr'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.disabled = (mode === 'local');
+            });
+        }
+
+        async function selectNetworkMode(mode) {
+            const chk = document.getElementById('chkTailscaleHttps') || document.getElementById('simpleChkTailscaleHttps');
+            const https = chk ? chk.checked : false;
+            updateModeButtonsUI(mode, https);
+            if (window.pywebview && window.pywebview.api) {
+                const res = await window.pywebview.api.set_network_mode(mode, https);
+                if (mode === 'tailscale') {
+                    if (res && res.tailscale) {
+                        if (!res.tailscale.installed || !res.tailscale.running) {
+                            checkAndOpenTailscaleModal();
+                            return;
+                        }
+                    } else {
+                        checkAndOpenTailscaleModal();
+                        return;
+                    }
+                }
+                showToast(`公開モードを [${mode.toUpperCase()}] に切り替えました`);
+            }
+        }
+
+        async function onHttpsToggled() {
+            if (window.pywebview && window.pywebview.api) {
+                const chk = document.getElementById('chkTailscaleHttps') || document.getElementById('simpleChkTailscaleHttps');
+                const https = chk ? chk.checked : false;
+                await window.pywebview.api.set_network_mode(currentMode, https);
+            }
+        }
+
+        async function onOpenWebUI() {
+            if (window.pywebview && window.pywebview.api) {
+                await window.pywebview.api.open_webui();
+            }
+        }
+
+        async function onRestartServers() {
+            if (window.pywebview && window.pywebview.api) {
+                showToast('[INFO] 全サーバーの再起動を開始しました...');
+                await window.pywebview.api.start_or_restart_servers();
+            }
+        }
+
+        async function onStopServers() {
+            if (window.pywebview && window.pywebview.api) {
+                showToast('[INFO] 全サーバーを停止しています...');
+                await window.pywebview.api.stop_servers();
+            }
+        }
+
+        function copyGatewayUrl() {
+            const input = document.getElementById('gatewayUrlInput') || document.getElementById('simpleGatewayUrlInput');
+            navigator.clipboard.writeText(input.value).then(() => {
+                showToast('[OK] 接続URLをクリップボードにコピーしました');
+            });
+        }
+
+        async function openQrModal() {
+            if (!window.pywebview || !window.pywebview.api) return;
+            const res = await window.pywebview.api.get_qr_svg();
+            if (!res.ok) {
+                showToast(res.message || 'LAN公開またはTailscale公開に切り替えてください');
+                return;
+            }
+            document.getElementById('qrSvgHolder').innerHTML = res.svg;
+            document.getElementById('qrModalUrl').value = res.url;
+            document.getElementById('qrModal').classList.add('open');
+        }
+
+        async function openDoctorModal() {
+            document.getElementById('doctorModal').classList.add('open');
+            await runDoctorChecks();
+        }
+
+        async function runDoctorChecks() {
+            const out = document.getElementById('doctorOutput');
+            out.textContent = '[INFO] ローカルサーバー・LAN・Tailscale 診断を実行中...';
+            if (window.pywebview && window.pywebview.api) {
+                const report = await window.pywebview.api.run_doctor();
+                out.textContent = report;
+            }
+        }
+
+        async function openProfileModal() {
+            if (!window.pywebview || !window.pywebview.api) return;
+            const prof = await window.pywebview.api.get_profile();
+            document.getElementById('profPreset').value = prof.PROFILE_NAME || '16GB (High)';
+            document.getElementById('profNcmoe').value = prof.NCMOE ?? 9;
+            document.getElementById('profVision').checked = !!(prof.MMPROJ_ARGS && String(prof.MMPROJ_ARGS).trim());
+            document.getElementById('profileModal').classList.add('open');
+        }
+
+        function onPresetChange() {
+            const p = document.getElementById('profPreset').value;
+            const map = {
+                '24GB (Ultra)': { ncmoe: 0, vision: true },
+                '16GB (High)': { ncmoe: 9, vision: false },
+                '12GB (Medium)': { ncmoe: 16, vision: false },
+                '8GB (Low/Medium)': { ncmoe: 20, vision: false }
+            };
+            if (map[p]) {
+                document.getElementById('profNcmoe').value = map[p].ncmoe;
+                document.getElementById('profVision').checked = map[p].vision;
+            }
+        }
+
+        async function saveProfile(restartAfter) {
+            if (!window.pywebview || !window.pywebview.api) return;
+            const preset = document.getElementById('profPreset').value;
+            const ncmoe = parseInt(document.getElementById('profNcmoe').value, 10) || 0;
+            const vision = document.getElementById('profVision').checked;
+            await window.pywebview.api.save_profile(preset, ncmoe, vision, restartAfter);
+            closeModal('profileModal');
+            showToast(restartAfter ? '[OK] プロファイルを保存し、サーバーを再起動します' : '[OK] deining_profile.bat を保存しました');
+        }
+
+        async function onClearRagTable() {
+            if (window.pywebview && window.pywebview.api) {
+                await window.pywebview.api.clear_rag_history();
+            }
+        }
+
+        function renderRagTable(rows) {
+            ragRowsCache = rows || [];
+            const tbody = document.getElementById('ragTableBody');
+            if (!ragRowsCache.length) {
+                tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 28px 16px;">会話が実行されると、ChromaDB のコサイン類似度計算結果と親子リトリーバルの採否がここに一覧表示されます。</td></tr>`;
+                return;
+            }
+            tbody.innerHTML = ragRowsCache.map((r, idx) => {
+                let rowClass = 'row-rejected';
+                if (r.tag === 'adopted_top') rowClass = 'row-adopted-top';
+                else if (r.tag === 'adopted') rowClass = 'row-adopted';
+                else if (r.tag === 'worldline_out') rowClass = 'row-worldline';
+                if (idx === selectedRagIdx) rowClass += ' selected';
+
+                const pct = Math.max(0, Math.min(100, Math.round(r.similarity * 100)));
+                const barColor = r.adopted ? 'var(--status-online)' : 'var(--text-muted)';
+
+                return `<tr class="${rowClass}" tabindex="0" onclick="selectRagRow(${idx})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectRagRow(${idx});}">
+                    <td style="font-family: var(--font-mono); font-weight: 600;">${escapeHtml(r.status)}</td>
+                    <td><span class="cat-pill cat-${escapeHtml(r.category)}">${escapeHtml(r.category)}</span></td>
+                    <td>
+                        <div class="sim-cell">
+                            <span>${r.similarity.toFixed(4)}</span>
+                            <div class="sim-bar-bg"><div class="sim-bar-fill" style="width:${pct}%; background:${barColor};"></div></div>
+                        </div>
+                    </td>
+                    <td style="font-family: var(--font-mono);">${r.distance.toFixed(4)}</td>
+                    <td style="color: var(--accent-cyan);">${escapeHtml(r.key)}</td>
+                    <td>${escapeHtml(r.content)}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        function selectRagRow(idx) {
+            selectedRagIdx = idx;
+            const r = ragRowsCache[idx];
+            if (!r) return;
+            document.getElementById('ragDetailBar').textContent =
+                `[${r.category} | ${r.status} | 類似度: ${r.similarity.toFixed(4)} (距離: ${r.distance.toFixed(4)})] キー: ${r.key}  |  内容: ${r.content}`;
+            renderRagTable(ragRowsCache);
+        }
+
+        function switchLogTab(tabKey) {
+            activeTab = tabKey;
+            document.querySelectorAll('#logTabBar .tab-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.tab === tabKey);
+            });
+            renderActiveLogTab();
+        }
+
+        function clearCurrentLogTab() {
+            logsByTab[activeTab] = [];
+            renderActiveLogTab();
+        }
+
+        function formatLogItemHtml(item, showBadge) {
+            const srcClass = item.is_error ? 'src-err' : `src-${item.source}`;
+            const badgeHtml = showBadge ? `<span class="log-badge ${srcClass}">[${escapeHtml(item.badge)}]</span>` : '';
+            return `<div class="log-line ${srcClass}"><span class="log-ts">${escapeHtml(item.ts)}</span>${badgeHtml}${escapeHtml(item.line)}</div>`;
+        }
+
+        function renderActiveLogTab() {
+            const vp = document.getElementById('consoleViewport');
+            const filterNoise = document.getElementById('chkNoiseFilter').checked;
+            const kw = document.getElementById('logKeywordFilter').value.trim().toLowerCase();
+            const list = logsByTab[activeTab] || [];
+            const showBadge = (activeTab === 'all');
+
+            const filtered = list.filter(item => {
+                if (filterNoise && item.is_noise) return false;
+                if (kw && !item.line.toLowerCase().includes(kw)) return false;
+                return true;
+            });
+
+            vp.innerHTML = filtered.slice(-600).map(item => formatLogItemHtml(item, showBadge)).join('');
+            if (document.getElementById('chkAutoScroll').checked) {
+                vp.scrollTop = vp.scrollHeight;
+            }
+        }
+
+        function appendIncomingLogs(newLogs) {
+            if (!newLogs || !newLogs.length) return;
+            const vp = document.getElementById('consoleViewport');
+            const filterNoise = document.getElementById('chkNoiseFilter').checked;
+            const kw = document.getElementById('logKeywordFilter').value.trim().toLowerCase();
+            let appendedToActive = false;
+
+            for (const item of newLogs) {
+                if (logsByTab[item.source]) {
+                    logsByTab[item.source].push(item);
+                    if (logsByTab[item.source].length > 1200) logsByTab[item.source].shift();
+                }
+                if (!item.is_divider) {
+                    logsByTab.all.push(item);
+                    if (logsByTab.all.length > 1500) logsByTab.all.shift();
+                }
+
+                const belongsToActive = (activeTab === 'all' && !item.is_divider) || (activeTab === item.source);
+                if (belongsToActive) {
+                    if (filterNoise && item.is_noise) continue;
+                    if (kw && !item.line.toLowerCase().includes(kw)) continue;
+                    vp.insertAdjacentHTML('beforeend', formatLogItemHtml(item, activeTab === 'all'));
+                    appendedToActive = true;
+                }
+            }
+
+            while (vp.childElementCount > 650) {
+                vp.removeChild(vp.firstElementChild);
+            }
+
+            if (appendedToActive && document.getElementById('chkAutoScroll').checked) {
+                vp.scrollTop = vp.scrollHeight;
+            }
+        }
+
+        function applyStatusBadges(badges) {
+            if (!badges) return;
+            let anyOnline = false;
+            let anyLoading = false;
+            let allOffline = true;
+
+            for (const key of ['llm', 'flask', 'tts', 'gw']) {
+                const info = badges[key];
+                if (!info) continue;
+
+                // Detailed view badges
+                const pill = document.getElementById(`badge-${key}`);
+                const txt = document.getElementById(`badge-text-${key}`);
+                if (pill && txt) {
+                    pill.setAttribute('data-state', info.state);
+                    txt.textContent = info.text;
+                }
+
+                // Simple view badges
+                const sTile = document.getElementById(`simple-badge-${key}`);
+                const sTxt = document.getElementById(`simple-badge-text-${key}`);
+                if (sTile && sTxt) {
+                    sTile.setAttribute('data-state', info.state);
+                    sTxt.textContent = info.text.replace(' (8080)', '').replace(' (5000)', '').replace(' (5001)', '').replace(' (8090)', '');
+                }
+
+                if (key !== 'gw') {
+                    if (info.state === 'online') anyOnline = true;
+                    if (info.state === 'loading') anyLoading = true;
+                    if (info.state !== 'offline') allOffline = false;
+                }
+            }
+
+            // Simple view hero cluster status card update
+            const heroPill = document.getElementById('simpleHeroStatusPill');
+            const heroItem = document.getElementById('simpleHeroStatusItem');
+            const heroTxt = document.getElementById('simpleClusterStatusText');
+            const heroDesc = document.getElementById('simpleClusterStatusDesc');
+
+            if (heroPill && heroTxt && heroDesc) {
+                if (badges.llm && badges.llm.state === 'online' && badges.flask && badges.flask.state === 'online') {
+                    heroPill.setAttribute('data-cluster', 'online');
+                    if (heroItem) heroItem.setAttribute('data-state', 'online');
+                    heroTxt.textContent = 'AI サーバー準備完了 (ONLINE)';
+                    heroDesc.textContent = 'LLM推論および記憶（RAG）サーバーが正常に稼働しています。「WebUI を開く」を押すとブラウザでチャットを開始できます。';
+                } else if (anyLoading) {
+                    heroPill.setAttribute('data-cluster', 'loading');
+                    if (heroItem) heroItem.setAttribute('data-state', 'loading');
+                    heroTxt.textContent = 'AI サーバー起動処理中 (STARTING)';
+                    heroDesc.textContent = 'LLMモデルの重みロードまたは各サーバープロセスの初期化を実行しています。起動完了まで少々お待ちください。';
+                } else if (allOffline) {
+                    heroPill.setAttribute('data-cluster', 'offline');
+                    if (heroItem) heroItem.setAttribute('data-state', 'offline');
+                    heroTxt.textContent = 'AI サーバー停止中 (OFFLINE)';
+                    heroDesc.textContent = '全サーバーが停止しています。会話を行うには「全サーバー起動 / 再起動」を押してください。';
+                } else {
+                    heroPill.setAttribute('data-cluster', 'loading');
+                    if (heroItem) heroItem.setAttribute('data-state', 'loading');
+                    heroTxt.textContent = '一部サーバー待機中';
+                    heroDesc.textContent = '稼働状態を確認しています。必要なサーバーが起動するまでお待ちください。';
+                }
+            }
+        }
+
+        function applyTelemetry(t) {
+            if (!t) return;
+            const pSummary = document.getElementById('profileSummary');
+            if (pSummary) pSummary.textContent = t.profile_summary;
+            const sPSummary = document.getElementById('simpleProfileReadout');
+            if (sPSummary) sPSummary.textContent = t.profile_summary;
+
+            document.getElementById('metricTps').textContent = t.tps;
+            document.getElementById('metricPromptEval').textContent = t.prompt_eval;
+            document.getElementById('metricCtx').textContent = t.ctx_text;
+            document.getElementById('ctxBarFill').style.width = `${Math.min(100, Math.max(0, t.ctx_pct || 0))}%`;
+            document.getElementById('metricKvReuse').textContent = t.kv_reuse;
+            document.getElementById('kvBarFill').style.width = `${Math.min(100, Math.max(0, t.kv_pct || 0))}%`;
+            document.getElementById('metricKvMismatch').textContent = t.kv_mismatch;
+
+            const stEl = document.getElementById('metricSearchToggle');
+            stEl.textContent = t.search_toggle;
+            stEl.className = 'status-tag ' + (t.search_toggle === 'ON' ? 'tag-on' : 'tag-off');
+
+            document.getElementById('metricSearchQuery').textContent = t.search_query;
+            document.getElementById('metricTtsState').textContent = t.tts_state;
+            document.getElementById('metricTtsText').textContent = t.tts_text;
+
+            const urlInput = document.getElementById('gatewayUrlInput');
+            if (urlInput && document.activeElement !== urlInput) {
+                urlInput.value = t.gateway_url;
+            }
+            const sUrlInput = document.getElementById('simpleGatewayUrlInput');
+            if (sUrlInput && document.activeElement !== sUrlInput) {
+                sUrlInput.value = t.gateway_url;
+            }
+        }
+
+        async function pollLoop() {
+            try {
+                if (window.pywebview && window.pywebview.api) {
+                    const data = await window.pywebview.api.poll_updates(lastLogSeq, currentRagVersion);
+                    if (data) {
+                        if (data.last_seq !== undefined) lastLogSeq = data.last_seq;
+                        applyStatusBadges(data.badges);
+                        applyTelemetry(data.telemetry);
+                        appendIncomingLogs(data.logs);
+                        if (data.rag_updated) {
+                            currentRagVersion = data.rag_version;
+                            document.getElementById('ragSummaryText').textContent = data.rag_summary;
+                            renderRagTable(data.rag_rows);
+                        }
+                        if (data.open_doctor_once) {
+                            openDoctorModal();
+                        }
+                    }
+                }
+            } catch (e) {
+                // Ignore transient bridge errors during shutdown
+            } finally {
+                setTimeout(pollLoop, 250);
+            }
+        }
+
+        window.addEventListener('pywebviewready', async () => {
+            if (window.pywebview && window.pywebview.api) {
+                const init = await window.pywebview.api.get_initial_state();
+                if (init) {
+                    updateModeButtonsUI(init.gateway_mode, init.tailscale_https);
+                }
+                pollLoop();
+            }
+        });
+    </script>
+</body>
+</html>

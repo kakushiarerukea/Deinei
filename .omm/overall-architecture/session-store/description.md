@@ -1,0 +1,1 @@
+ローカルの chats/*.json に会話履歴ツリーを保存。セッションID検証（is_safe_session_id）によりPath Traversalを防止。

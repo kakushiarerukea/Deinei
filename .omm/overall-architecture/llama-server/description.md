@@ -1,0 +1,1 @@
+llama.cpp b9873 ビルドの推論サーバー。CUDA 13.3 GPU推論を提供し、custom_public の静的配信ルートを兼ねる。

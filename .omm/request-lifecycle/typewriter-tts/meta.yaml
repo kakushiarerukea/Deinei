@@ -1,0 +1,37 @@
+created: 2026-10-11T09:14:21.555Z
+updated: 2026-10-11T09:18:27.966Z
+update_count: 5
+last_field: diagram
+kind: nested-class
+title: typewriter-tts
+children: []
+parentPath: []
+prev_diagram: "graph LR\r
+
+  \    llm-done[\"LLM生成完了通知\\n段落テキストのパース\"]\r
+
+  \    filter-narration[\"ト書き・地の文分離\\n*斜体* や (心の声) を検出\"]\r
+
+  \    instant-reveal[\"ト書き即時開示\\n音声待機なしで全文表示\"]\r
+
+  \    tts-synthesize[\"TTS音声合成 (5001)\\nIrodori-TTS WAVストリーミング\"]\r
+
+  \    web-audio[\"Web Audio API\\nAnalyserNode (FFT 256)\"]\r
+
+  \    mouth-sync[\"口パク同期\\nParamMouthOpenY (0.0〜1.0)\"]\r
+
+  \    typewriter-anim[\"タイプライター表示\\n15 TPS (1秒15文字) アニメ\"]\r
+
+  \r
+
+  \    llm-done -- 段落分類 --> filter-narration\r
+
+  \    filter-narration -- 非発話テキスト --> instant-reveal\r
+
+  \    filter-narration -- 発話セリフ --> tts-synthesize\r
+
+  \    tts-synthesize -- 波形解析 --> web-audio\r
+
+  \    web-audio -- 音量指数平滑化 --> mouth-sync\r
+
+  \    tts-synthesize -- 音声再生進行同期 --> typewriter-anim\r\n"

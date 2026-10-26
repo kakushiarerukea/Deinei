@@ -1,0 +1,1 @@
+ブランチ切替や削除時に、対象世界線のスナップショットから lastSummarizedIndex と aiHistoryTextList を安全に復元する純粋ロジック。

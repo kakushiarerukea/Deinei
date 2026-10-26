@@ -1,0 +1,1 @@
+本番データ（backend/data/chroma_db/）に対してテストを実行しないこと。DEINEI_CHROMA_DIR で隔離先を指定すること。

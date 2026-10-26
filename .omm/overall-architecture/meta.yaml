@@ -1,0 +1,45 @@
+created: 2026-10-11T09:03:55.689Z
+updated: 2026-10-11T09:18:26.964Z
+update_count: 16
+last_field: diagram
+git_commit: f679253
+git_branch: main
+children:
+  - chroma-db
+  - data-server
+  - live2d-engine
+  - llama-server
+  - session-store
+  - tts-server
+  - web-ui
+prev_diagram: "graph LR\r
+
+  \    web-ui[\"WebUI フロントエンド\\nSvelte 5 / Vite\"]\r
+
+  \    llama-server[\"LLM推論 & 静的配信\\nllama-server.exe (8080)\"]\r
+
+  \    data-server[\"Flaskメインプロキシ\\nserver.py (5000)\"]\r
+
+  \    tts-server[\"TTS音声合成サーバー\\ntts_server.py (5001)\"]\r
+
+  \    chroma-db[\"ChromaDB ベクトルストア\\ncl-nagoya/ruri-v3-310m\"]\r
+
+  \    session-store[\"セッションJSON永続化\\nchats/*.json\"]\r
+
+  \    live2d-engine[\"Live2D描画 & 同期\\navatar-core-v2.js\"]\r
+
+  \r
+
+  \    web-ui -- LLM推論ストリーム & 静的アセット --> llama-server\r
+
+  \    web-ui -- RAG記憶・要約・Web検索・履歴API --> data-server\r
+
+  \    web-ui -- WAV音声合成リクエスト --> tts-server\r
+
+  \    web-ui -- 表情制御・口パク・視線追従 --> live2d-engine\r
+
+  \    data-server -- 長期記憶の埋め込み & 類似度検索 --> chroma-db\r
+
+  \    data-server -- 会話ツリーの安全なファイル読書 --> session-store\r
+
+  \    data-server -- OpenAI互換推論リクエスト中継 --> llama-server\r\n"

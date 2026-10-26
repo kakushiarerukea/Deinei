@@ -1,0 +1,1 @@
+nvidia-smi および Win32_VideoController によりGPU型番と実効VRAM容量を判定（24GB Ultra / 16GB High / 12GB Medium）。

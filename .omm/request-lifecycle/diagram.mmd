@@ -1,0 +1,15 @@
+graph LR
+    user-input["ユーザー入力\n通常発話 or 空送信"]
+    silence-handler["沈黙検知・動的注入\n…… をト書き促進指示へ一時変換"]
+    search-trigger["キーワード事前判定 (0ms)\n検索指示の有無を高速検査"]
+    memory-retrieval["記憶想起 & 相対時間計算\nFact / Episode / [3日前]"]
+    llm-stream["LLMストリーミング生成\nGPU 100%専有・高速推論"]
+    typewriter-tts["時分割TTS & 15TPS同期\nLLM完了後に音声合成 & 口パク"]
+
+    user-input -->|空送信| silence-handler
+    user-input -->|通常発話| search-trigger
+    silence-handler -->|展開指示注入| memory-retrieval
+    search-trigger -->|雑談時KV保全| memory-retrieval
+    search-trigger -->|検索時Stage1実行| memory-retrieval
+    memory-retrieval -->|プロンプト送信| llm-stream
+    llm-stream -->|生成完了トリガー| typewriter-tts

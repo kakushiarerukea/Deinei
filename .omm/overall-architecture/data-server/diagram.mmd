@@ -1,0 +1,13 @@
+graph LR
+    security["セキュリティシールド\nHost / Origin / APIKey"]
+    session-api["セッション管理API\n/api/sessions"]
+    memory-api["記憶管理API\n/memory/*"]
+    proxy-api["推論プロキシ\n/v1/chat/completions"]
+    search-engine["Web検索 & 気象API\nsearch_trigger.py"]
+    time-engine["相対時間タグ計算\nget_time_difference_str"]
+
+    security -->|検証通過リクエスト| proxy-api
+    security -->|セッション操作| session-api
+    security -->|記憶登録・検索| memory-api
+    proxy-api -->|キーワード判定| search-engine
+    proxy-api -->|タイムスタンプ変換| time-engine

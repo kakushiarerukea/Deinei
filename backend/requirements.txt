@@ -1,0 +1,27 @@
+# Deining System Python Dependencies
+# Web & API Servers
+flask>=3.0.0
+flask-cors>=4.0.0
+requests>=2.31.0
+fastapi>=0.110.0
+uvicorn>=0.28.0
+pydantic>=2.6.0
+
+# Vector DB & RAG Memory
+chromadb>=0.4.22
+sentence-transformers>=2.3.1
+protobuf>=5.0.0,<7.0.0
+
+# Web Search
+duckduckgo_search>=5.0.0
+
+# Machine Learning & Audio
+torch>=2.2.0
+numpy>=1.26.0
+soundfile>=0.12.1
+safetensors>=0.4.2
+huggingface_hub>=0.21.0
+tqdm>=4.66.0
+torchao>=0.16.0
+segno>=1.6.0
+pywebview>=5.0

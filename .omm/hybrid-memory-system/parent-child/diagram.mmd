@@ -1,0 +1,13 @@
+graph LR
+    pushout-block["押し出された要約親テキスト\n約500文字エピソード"]
+    key-extract["子要素キーフレーズ抽出\nカギ括弧・固有名詞・出来事"]
+    det-id["決定論的ID生成\nsha256(pc_session_msg_idx)"]
+    chroma-upsert["ChromaDB upsert\nParent-Childメタデータ"]
+    dual-query["Dual-Query並行検索\nFactクエリと分離実行"]
+    safe-cap["句点安全切断 & 800文字キャップ\n最大2件注入"]
+
+    pushout-block -->|キーワード抽出| key-extract
+    key-extract -->|ハッシュ生成| det-id
+    det-id -->|ベクトル登録| chroma-upsert
+    chroma-upsert -->|対話時想起| dual-query
+    dual-query -->|文字数安全切断| safe-cap

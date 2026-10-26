@@ -1,0 +1,1 @@
+泥濘（Deinei）システムの全体アーキテクチャ。Svelte 5製WebUI、CUDA推論・静的配信を行うllama-server、長期記憶・セッション・プロキシを司るFlaskデータサーバー、音声合成を行うIrodori-TTS、およびLive2D同期エンジンで構成される完全ローカルAIアシスタント基盤です。

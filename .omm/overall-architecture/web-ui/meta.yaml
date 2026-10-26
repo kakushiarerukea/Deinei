@@ -1,0 +1,33 @@
+created: 2026-10-11T09:03:56.788Z
+updated: 2026-10-11T09:18:27.178Z
+update_count: 10
+last_field: diagram
+kind: nested-class
+title: web-ui
+children: []
+parentPath: []
+prev_diagram: "graph LR\r
+
+  \    ui-routes[\"UIルート & ページ\\nroutes/+page.svelte\"]\r
+
+  \    chat-store[\"チャット状態管理\\nstores/chat.svelte.ts\"]\r
+
+  \    conv-store[\"会話ツリー管理\\nstores/conversations.svelte.ts\"]\r
+
+  \    db-service[\"IndexedDB永続化\\nservices/database.service.ts\"]\r
+
+  \    chat-service[\"APIクライアント通信\\nservices/chat.service.ts\"]\r
+
+  \    avatar-bridge[\"アバター通信ブリッジ\\nLive2DControls.svelte\"]\r
+
+  \r
+
+  \    ui-routes -- ユーザー入力・表示バインド --> chat-store\r
+
+  \    chat-store -- 履歴ツリー同期 --> conv-store\r
+
+  \    chat-store -- 推論・要約・記憶API呼び出し --> chat-service\r
+
+  \    conv-store -- ローカルストレージ永続化 --> db-service\r
+
+  \    chat-store -- 感情タグ・音声再生トリガー --> avatar-bridge\r\n"
