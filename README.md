@@ -19,7 +19,7 @@
     <a href="https://developer.nvidia.com/cuda-zone"><img src="https://img.shields.io/badge/CUDA-13.3%20Supported-76B900?style=flat-square&logo=nvidia" alt="CUDA"></a>
     <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3.10%20(uv)-3776AB?style=flat-square&logo=python" alt="Python"></a>
     <a href="https://svelte.dev"><img src="https://img.shields.io/badge/Frontend-Svelte%205%20%2B%20Tailwind-FF3E00?style=flat-square&logo=svelte" alt="Frontend"></a>
-    <a href="tests/"><img src="https://img.shields.io/badge/Tests-93%20Passed-3fb950?style=flat-square&logo=pytest" alt="Tests"></a>
+    <a href="tests/"><img src="https://img.shields.io/badge/Tests-94%20Passed-3fb950?style=flat-square&logo=pytest" alt="Tests"></a>
   </p>
 
   <!-- 仕様書ナビゲーション (docs/) -->

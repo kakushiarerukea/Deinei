@@ -66,6 +66,7 @@ class DeineiGatewayHandler(BaseHTTPRequestHandler):
     target_tts_port: int = 5001
     allowed_hosts: set = set()
     is_https: bool = False
+    _override_client_ip = None
 
     # HTTP/1.1 対応およびソケット読み取りタイムアウト・ボディサイズ上限
     protocol_version = "HTTP/1.1"
@@ -215,6 +216,28 @@ class DeineiGatewayHandler(BaseHTTPRequestHandler):
             self.wfile.flush()
             self.close_connection = True
             return
+
+        # [利用規約第9条保護] LAN / リモート端末クライアントへの Live2D イラスト・モデル配信を遮断
+        # (Vtem利用規約: イラストをサーバ等のハードディスクにコピーし、LAN接続等により複数のPCで使用することは禁止)
+        client_ip = self._override_client_ip or self.client_address[0]
+        is_loopback_client = client_ip in ("127.0.0.1", "::1", "localhost")
+        if not is_loopback_client:
+            raw_req_path = urllib.parse.urlsplit(self.path).path.lower()
+            if raw_req_path.startswith("/deining/ulvm2_0001/") or raw_req_path.startswith("/deining/fav_usaneko_alwb/"):
+                print(f"[WARN] Gateway: 利用規約第9条に基づき、LAN/リモート端末 ({client_ip}) へのLive2Dモデル配信を遮断しました: {raw_req_path}")
+                err_body = (
+                    b'{"error":"Forbidden: Live2D model assets cannot be served over LAN or remote connections '
+                    b'in accordance with the author\'s terms of service (Article 9). Please use 3D VRM models instead."}'
+                )
+                self.send_response(403)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(err_body)))
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(err_body)
+                self.wfile.flush()
+                self.close_connection = True
+                return
 
         # 3. 転送先の決定
         target_port, target_path = self._resolve_target(self.path)

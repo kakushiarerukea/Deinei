@@ -4,7 +4,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { MousePointer2, Settings, BoxSelect, Smile, Shirt, Eye, EyeOff, Plus, Upload, Loader2, Trash2, SlidersHorizontal, ShieldCheck } from '@lucide/svelte';
 	import { onMount, onDestroy } from 'svelte';
-	import { deiningAvatar } from '$lib/vrm/avatar-facade.svelte';
+	import { deiningAvatar, isLocalAccess, isVrmUrl } from '$lib/vrm/avatar-facade.svelte';
 	import { t } from '$lib/stores/i18n.svelte';
 	import { toast } from 'svelte-sonner';
 	import { getGatewayBaseUrl } from '$lib/constants/api-endpoints';
@@ -347,6 +347,7 @@
 	onMount(async () => {
 		await fetchModels();
 
+		const isRemote = !isLocalAccess();
 		const savedModel = localStorage.getItem('sys_avatar_pref');
 		if (savedModel) {
 			const match = models.find(m => m.value === savedModel || (m.id === 'silver' && (savedModel.includes('ulvm2') || savedModel.includes('銀髪の女の子'))) || (m.id === 'brown' && (savedModel.includes('fav_usaneko') || savedModel.includes('茶髪の癒し系お姉さん'))));
@@ -354,6 +355,25 @@
 				selectedModel = match.value;
 			}
 		}
+
+		// リモート/LAN環境でのLive2D利用規約セーフガード
+		if (isRemote && !isVrmUrl(selectedModel)) {
+			// VRMモデルが存在すればVRMへ自動優先切り替え
+			const firstVrm = models.find(m => m.kind === 'vrm');
+			if (firstVrm) {
+				selectedModel = firstVrm.value;
+				localStorage.setItem('sys_avatar_pref', firstVrm.value);
+			} else {
+				// VRMが未登録の場合はトースト通知を表示し、Live2D描画は抑止
+				setTimeout(() => {
+					toast.warning(
+						'利用規約の制限により、LANおよびリモートアクセス環境ではLive2Dモデルをご利用いただけません。3Dアバター（.vrm）を追加・選択してご利用ください。',
+						{ duration: 9000 }
+					);
+				}, 800);
+			}
+		}
+
 		// Svelteのコンポーネント（DOM）マウント後にアバターシステムを初期化 (Live2D / VRM 自動判定)
 		deiningAvatar.mount();
 
@@ -407,6 +427,12 @@
 
 	function handleModelChange(value: string) {
 		selectedModel = value;
+		if (!isVrmUrl(value) && !isLocalAccess()) {
+			toast.warning(
+				'利用規約の制限により、LANおよびリモートアクセス環境ではLive2Dモデルをご利用いただけません。VRMモデルをご利用いただくか、PCローカル環境（127.0.0.1）からアクセスしてください。',
+				{ duration: 8000 }
+			);
+		}
 		deiningAvatar.changeModel(value);
 	}
 

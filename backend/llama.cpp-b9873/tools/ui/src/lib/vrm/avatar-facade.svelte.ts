@@ -34,12 +34,18 @@ export interface AvatarFacade {
 
 let isVrm = false;
 
+export function isLocalAccess(): boolean {
+	if (typeof window === 'undefined' || !window.location) return true;
+	const h = window.location.hostname.toLowerCase();
+	return h === '127.0.0.1' || h === 'localhost' || h === '::1';
+}
+
 function getAvatarPref(): string {
 	if (typeof window === 'undefined') return '';
 	return localStorage.getItem('sys_avatar_pref') || '';
 }
 
-function isVrmUrl(url: string): boolean {
+export function isVrmUrl(url: string): boolean {
 	return (
 		url.startsWith('/deining/vrm/') ||
 		url.toLowerCase().endsWith('.vrm') ||
@@ -63,6 +69,18 @@ export async function mountAvatar(): Promise<void> {
 			await loadVrmModel(pref);
 		}
 	} else {
+		// LAN / リモートアクセス時の Live2D 描画抑止（利用規約第9条保護）
+		if (!isLocalAccess()) {
+			isVrm = false;
+			if (vrmCanvas) vrmCanvas.style.display = 'none';
+			if (live2dCanvas) live2dCanvas.style.display = 'none';
+			const core = (window as any).deiningAvatarCore;
+			if (core?.setLive2dActive) core.setLive2dActive(false);
+			const guideEl = document.getElementById('deining-live2d-guidance');
+			if (guideEl) guideEl.style.display = 'none';
+			return;
+		}
+
 		isVrm = false;
 		if (vrmCanvas) vrmCanvas.style.display = 'none';
 		if (live2dCanvas) live2dCanvas.style.display = 'block';
@@ -106,6 +124,16 @@ export async function changeModel(url: string): Promise<void> {
 		stopAnimationLoop();
 
 		if (vrmCanvas) vrmCanvas.style.display = 'none';
+
+		// LAN / リモートアクセス時の Live2D 描画抑止（利用規約第9条保護）
+		if (!isLocalAccess()) {
+			if (live2dCanvas) live2dCanvas.style.display = 'none';
+			if (core?.setLive2dActive) core.setLive2dActive(false);
+			const guideEl = document.getElementById('deining-live2d-guidance');
+			if (guideEl) guideEl.style.display = 'none';
+			return;
+		}
+
 		if (live2dCanvas) live2dCanvas.style.display = 'block';
 
 		// Live2D 描画ループを再開 & マウント

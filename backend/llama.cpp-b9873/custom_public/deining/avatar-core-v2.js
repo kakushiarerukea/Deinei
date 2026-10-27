@@ -1147,6 +1147,14 @@ function showLive2DGuidance() {
     const avatarContainer = document.getElementById('avatar-container') || document.body;
     let guideEl = document.getElementById('deining-live2d-guidance');
 
+    // LAN / リモートアクセス環境ではLive2D利用規約の制限によりガイダンス表示を抑止
+    const h = (window.location.hostname || '').toLowerCase();
+    const isLocal = h === '127.0.0.1' || h === 'localhost' || h === '::1';
+    if (!isLocal) {
+        if (guideEl) guideEl.style.display = 'none';
+        return;
+    }
+
     // 動的ホバースタイルの注入 (初回のみ)
     if (!document.getElementById('deining-live2d-guidance-styles')) {
         const styleEl = document.createElement('style');

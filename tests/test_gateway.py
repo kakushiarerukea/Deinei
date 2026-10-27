@@ -21,7 +21,8 @@ DATA_DIR = os.path.join(REPO_ROOT, "backend", "data")
 if DATA_DIR not in sys.path:
     sys.path.insert(0, DATA_DIR)
 
-from gateway import DeineiGateway, ThreadingHTTPServer
+from gateway import DeineiGateway, ThreadingHTTPServer, DeineiGatewayHandler
+import requests
 
 
 # テスト用ダミーバックエンドハンドラ
@@ -372,6 +373,19 @@ class TestGateway(unittest.TestCase):
         resp = s.recv(1024).decode("utf-8", errors="replace")
         s.close()
         self.assertTrue("400 " in resp or resp.startswith("HTTP/1.1 400"), f"Expected 400, got: {resp}")
+
+    def test_16_remote_live2d_blocked(self):
+        # 非ローカル（LAN端末 192.168.1.50 等）からの Live2D モデル要求は 403 で遮断されること
+        try:
+            DeineiGatewayHandler._override_client_ip = "192.168.1.50"
+            r = requests.get(
+                f"{self.base_url}/deining/ulvm2_0001/ulvm2_0001.model3.json",
+                headers={"Authorization": f"Bearer {self.test_token}"}
+            )
+            self.assertEqual(r.status_code, 403)
+            self.assertIn("Forbidden", r.text)
+        finally:
+            DeineiGatewayHandler._override_client_ip = None
 
 
 if __name__ == "__main__":
