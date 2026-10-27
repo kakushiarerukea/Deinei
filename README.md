@@ -92,7 +92,7 @@
 | :--- | :--- | :--- |
 | **OS** | **Windows 11 (64-bit)** | Windows 10 (64-bit) ※MS公式サポート終了済み |
 | **CPU** | **AVX2 命令セット対応 6コア/12スレッド以上**<br>(Intel 第8世代 Core / AMD Ryzen 3000番台以降) | **x86-64 (SSE4.2) 4コア以上**<br>※SSE4.2/x64バックエンドを同梱し実行時に自動選択 |
-| **システムRAM** | **32GB 以上**<br>(実測コミット: LLM 約18GB + TTS 約12GB + RAG 約3GB) | **32GB**<br>※16GBはページファイル32GB以上が必要で非推奨 |
+| **システムRAM** | **32GB 以上**<br>(全プロセスを物理RAM内に余裕で常駐可能) | **16GB**<br>(VRAM 8GB + RAM 16GB環境にて 実測約30 TPS を確認済み ※SSDの空き容量・ページファイル確保が必要) |
 | **GPU** | **NVIDIA GeForce RTX 3060・5070 (12GB) / 4060Ti・5060Ti・5070Ti・5080 (16GB) / 3090・4090 (24GB) / 5090 (32GB)**<br>(VRAM 12GB〜32GB) | **NVIDIA GPU (VRAM 8GB以上)**<br>[WARN] **Turing世代以降必須** (RTX 20系 / GTX 16系以降 / RTX 50系)<br>※Pascal (GTX 10系) 以前はCUDA 13非対応のため動作対象外 |
 | **GPUドライバ** | **NVIDIA Driver 616.56 以上**<br>(CUDA 13.3対応。実機確認: 616.92) | **NVIDIA Driver 580.xx 以上**<br>(CUDA 13.x の最小要件) |
 | **ストレージ** | **SSD 40GB 以上の空き容量**<br>(モデル約16GB＋Python環境＋依存パッケージ＋一時ファイル) | **30GB 以上**<br>※実測: 23.5GB（TTS用venv 5.0GBを含む構成） |

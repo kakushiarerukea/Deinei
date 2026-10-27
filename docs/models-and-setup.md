@@ -67,7 +67,7 @@ RTX 5070 Ti (16GB VRAM) / 32GB RAM / NVIDIA Driver 616.92 / 16GBプロファイ�
 | 合計 | コミット約33.6GB | 32GB RAM + ページファイルで稼働 |
 
 - コミットは `Get-Process` の Private Memory の実測値です。ワーキングセットはOSのトリミングで変動するため、要件の判定には使いません。
-- 物理RAMは32GBを推奨します。16GB環境ではページファイルを32GB以上にしないとコミット不足（`os error 1455`）になる可能性がありますが、実用速度は出ないため非推奨です。
+- 物理RAMは32GB以上を推奨します（全プロセスを物理RAM内に余裕で常駐可能）。16GB環境でも、十分なページファイルとSSD空き容量を確保することで、VRAM 8GB + RAM 16GB環境にて実測約30 TPSの動作を確認しています（SSDの空き容量・ページファイルの事前確保を推奨）。
 - 数値はプロファイルで変動します。24GBプロファイルはTTSがBF16（モデル約3.1GB）になり、Visionが有効になります。8GBプロファイルは `-ncmoe 20` でCPU側のRAM使用量が増えます。
 - ストレージは、モデル（LLM 14.3GB + mmproj 0.93GB + TTS 0.9GB/3.1GB）とPython環境（PyTorch CUDA含む）、キャッシュを含めて30GB以上（推奨40GB）を確保してください。実測したリポジトリ全体は約24.0GB（TTS用venv 5.0GB、HFキャッシュ1.7GBを含む）です。統合venv構成ではこれより増えます。
 - CUDA Toolkitのインストールは不要です（`cudart-llama-bin-win-cuda-13.3-x64.zip` のDLLを同梱）。Python 3.10は `uv` が自動取得し、Node.jsも不要です（WebUIはビルド済み）。
