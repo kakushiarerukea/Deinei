@@ -184,12 +184,16 @@ def test_avatar_zip_security():
     
     headers = {"Origin": "http://localhost:8080"}
 
-    # A. 悪意あるスクリプト (.html / .js / .py) が混入したZIP
+    # A. 悪意あるスクリプト (.html / .js / .py) が混入したZIP (正規銀髪モデルのmoc3バイナリを内包)
+    silver_moc3_src = os.path.join(REPO_ROOT, 'backend', 'data', 'ulvm2_0001', 'ulvm2_0001.moc3')
+    with open(silver_moc3_src, 'rb') as f_moc:
+        real_silver_moc3 = f_moc.read()
+
     with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as tf:
         evil_zip_path = tf.name
     with zipfile.ZipFile(evil_zip_path, 'w') as z:
         z.writestr("ulvm2_0001/ulvm2_0001.model3.json", json.dumps({"Version": 3, "FileReferences": {}}))
-        z.writestr("ulvm2_0001/ulvm2_0001.moc3", b"dummy moc3 data")
+        z.writestr("ulvm2_0001/ulvm2_0001.moc3", real_silver_moc3)
         z.writestr("ulvm2_0001/texture_00.png", b"dummy png data")
         z.writestr("ulvm2_0001/malicious.html", b"<script>alert('xss')</script>")
         z.writestr("ulvm2_0001/evil.js", b"console.log('pwned')")
@@ -273,6 +277,24 @@ def test_avatar_zip_security():
             if os.path.exists(p):
                 os.remove(p)
 
+    # E. 未知・非公認Live2Dモデルのハッシュ値検証による遮断テスト (未公認moc3の拒絶)
+    with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as tf:
+        fake_zip_path = tf.name
+    with zipfile.ZipFile(fake_zip_path, 'w') as z:
+        z.writestr("ulvm2_0001/ulvm2_0001.model3.json", json.dumps({"Version": 3, "FileReferences": {}}))
+        z.writestr("ulvm2_0001/ulvm2_0001.moc3", b"unauthorized dummy moc3 binary data")
+        z.writestr("ulvm2_0001/texture_00.png", b"dummy png data")
+    try:
+        with open(fake_zip_path, 'rb') as f:
+            r = requests.post(f"{SERVER_URL}/api/avatar/upload", files={'file': ('fake_model.zip', f, 'application/zip')}, headers=headers)
+        print(f"[E: 未知Live2Dモデルハッシュ遮断テスト] -> Status: {r.status_code}, Body: {r.text.strip()}")
+        assert r.status_code == 400, f"Expected 400, got {r.status_code}"
+        err_msg = r.json().get("error", "")
+        assert "ハッシュ値が一致しません" in err_msg, f"Unexpected error message: {err_msg}"
+    finally:
+        if os.path.exists(fake_zip_path):
+            os.remove(fake_zip_path)
+
 def test_silver_model_actual_load():
     print("\n========================================================")
     print("🧪 6. 実データ「5衣装の銀髪モデル」のZIP化・読み込み検証")
@@ -322,6 +344,53 @@ def test_silver_model_actual_load():
         if all_ok:
             print("  ✅ 全アセット（5衣装・テクスチャ・JPGアイコン・VTube設定等）が欠落なく完全配置されました！")
         assert all_ok, "Some critical avatar assets are missing in isolated destination!"
+    finally:
+        if os.path.exists(actual_zip_path):
+            os.remove(actual_zip_path)
+
+def test_brown_model_actual_load():
+    print("\n========================================================")
+    print("6-B. 実データ「茶髪モデル」のZIP化・読み込み検証")
+    print("========================================================")
+    
+    brown_src = os.path.abspath(os.path.join(REPO_ROOT, 'backend', 'data', 'fav_usaneko_alwb'))
+    assert os.path.isdir(brown_src), f"Brown model dir not found: {brown_src}"
+
+    with tempfile.NamedTemporaryFile(suffix='.zip', delete=False) as tf:
+        actual_zip_path = tf.name
+    
+    file_count = 0
+    total_raw_size = 0
+    with zipfile.ZipFile(actual_zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as z:
+        for root, dirs, files in os.walk(brown_src):
+            for f in files:
+                full_path = os.path.join(root, f)
+                rel_path = os.path.relpath(full_path, brown_src)
+                z.write(full_path, os.path.join("fav_usaneko_alwb", rel_path))
+                file_count += 1
+                total_raw_size += os.path.getsize(full_path)
+    
+    print(f"  - 茶髪モデル実データ統計: ファイル数 = {file_count}個, 非圧縮サイズ = {total_raw_size / (1024*1024):.2f}MB")
+
+    headers = {"Origin": "http://localhost:8080"}
+    try:
+        with open(actual_zip_path, 'rb') as f:
+            r = requests.post(f"{SERVER_URL}/api/avatar/upload", files={'file': ('brown_actual.zip', f, 'application/zip')}, headers=headers)
+        print(f"[茶髪モデルアップロード結果] -> Status: {r.status_code}, Body: {r.text.strip()}")
+        assert r.status_code == 200, f"Expected 200, got {r.status_code}"
+        
+        dest_dir = os.path.join(TEST_CUSTOM_PUBLIC_DIR, 'deining', 'fav_usaneko_alwb')
+        key_files = [
+            'fav_usaneko_alwb.model3.json',
+            'fav_usaneko_alwb.moc3',
+            'fav_usaneko_alwb.cdi3.json',
+            'fav_usaneko_alwb.physics3.json',
+        ]
+        
+        all_ok = all(os.path.exists(os.path.join(dest_dir, kf)) for kf in key_files)
+        if all_ok:
+            print("  - 茶髪モデルの主要アセットが配置されました")
+        assert all_ok, "Some critical brown avatar assets are missing in isolated destination!"
     finally:
         if os.path.exists(actual_zip_path):
             os.remove(actual_zip_path)
@@ -390,6 +459,7 @@ if __name__ == '__main__':
         test_avatar_upload_path_removal()
         test_avatar_zip_security()
         test_silver_model_actual_load()
+        test_brown_model_actual_load()
         test_deduplicate_api()
         test_splash_health_check_cors()
         print("\n🎉 全てのセキュリティ回帰テストが成功しました！")

@@ -2766,6 +2766,23 @@ def patch_live2d_model_files(folder_path, model_id):
                 print(f"[Deining Live2D Patch] silver model3.json patch failed: {e}")
 
 
+# 公式認定 Live2D モデルの .moc3 バイナリ SHA-256 ハッシュホワイトリスト
+# 外部からの未知・非公認 Live2D モデルの配置を未然に防止し、正規モデルのみを安全に受け付ける
+OFFICIAL_LIVE2D_MOC3_HASHES = {
+    # 銀髪の女の子 (ulvm2_0001 / silver)
+    '32e3d42f84ef6d1b2a9e471cdd24b7da7265bdc459efff300e9e7797c28ac231': {
+        'id': 'silver',
+        'name': '銀髪の女の子',
+        'dest_folder': 'ulvm2_0001',
+    },
+    # 茶髪の癒し系お姉さん (fav_usaneko_alwb / brown)
+    '06c7e93cc3930778562d69e42adeea342a02ab7281db5bde090cf2612f0cac3c': {
+        'id': 'brown',
+        'name': '茶髪の癒し系お姉さん',
+        'dest_folder': 'fav_usaneko_alwb',
+    },
+}
+
 ALLOWED_LIVE2D_EXTENSIONS = (
     # Live2D Cubism 定義ファイル群
     '.moc3', '.model3.json', '.cdi3.json', '.physics3.json',
@@ -3094,16 +3111,41 @@ def extract_avatar_zip(zip_source, custom_public_dir, static_dir=None):
             print(f"[INFO] Live2Dモデル検出: {chosen_model3}")
 
             lower_str = (chosen_model3 + " " + folder_basename).lower()
-            if "ulvm2" in lower_str or "銀髪" in lower_str:
-                model_id = "silver"
-                model_name = "銀髪の女の子"
-                dest_folder_name = "ulvm2_0001"
-            elif "usaneko" in lower_str or "茶髪" in lower_str:
-                model_id = "brown"
-                model_name = "茶髪の癒し系お姉さん"
-                dest_folder_name = "fav_usaneko_alwb"
-            else:
-                return False, "対応外のLive2Dモデルです。Live2Dは規約上、公式専用モデル（銀髪の女の子 / 茶髪の癒し系お姉さん）のみに対応しています。お好みのオリジナルアバターを使いたい場合は、3Dアバター（.vrm形式 または VRM内包ZIP）をご利用ください。", None
+            moc3_files = []
+            for r_dir, _, fs in os.walk(model_source_dir):
+                for f in fs:
+                    if f.lower().endswith('.moc3'):
+                        moc3_files.append(os.path.join(r_dir, f))
+            if not moc3_files:
+                for r_dir, _, fs in os.walk(td):
+                    for f in fs:
+                        if f.lower().endswith('.moc3'):
+                            moc3_files.append(os.path.join(r_dir, f))
+
+            if not moc3_files:
+                return False, "Live2Dのモデルバイナリ（.moc3）が見つかりません。公式専用モデル（銀髪の女の子 / 茶髪の癒し系お姉さん）の正規ZIPファイルを指定してください。", None
+
+            matched_info = None
+            for moc3_path in moc3_files:
+                try:
+                    h = hashlib.sha256()
+                    with open(moc3_path, 'rb') as mf:
+                        while chunk := mf.read(65536):
+                            h.update(chunk)
+                    calc_hash = h.hexdigest().lower()
+                    if calc_hash in OFFICIAL_LIVE2D_MOC3_HASHES:
+                        matched_info = OFFICIAL_LIVE2D_MOC3_HASHES[calc_hash]
+                        print(f"[INFO] Live2D公式モデルハッシュ照合成功: {matched_info['name']} (hash={calc_hash[:16]}...)")
+                        break
+                except Exception as e:
+                    print(f"[WARN] moc3ハッシュ計算エラー ({moc3_path}): {e}")
+
+            if not matched_info:
+                return False, "対応外のLive2Dモデルです（モデルデータのハッシュ値が一致しません）。Live2Dは規約上、公式専用モデル（銀髪の女の子 / 茶髪の癒し系お姉さん）のみに対応しています。お好みのオリジナルアバターを使いたい場合は、3Dアバター（.vrm形式 または VRM内包ZIP）をご利用ください。", None
+
+            model_id = matched_info['id']
+            model_name = matched_info['name']
+            dest_folder_name = matched_info['dest_folder']
 
             target_root_dir = os.path.join(custom_public_dir, 'deining', dest_folder_name)
             try:
