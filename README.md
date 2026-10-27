@@ -19,7 +19,7 @@
     <a href="https://developer.nvidia.com/cuda-zone"><img src="https://img.shields.io/badge/CUDA-13.3%20Supported-76B900?style=flat-square&logo=nvidia" alt="CUDA"></a>
     <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3.10%20(uv)-3776AB?style=flat-square&logo=python" alt="Python"></a>
     <a href="https://svelte.dev"><img src="https://img.shields.io/badge/Frontend-Svelte%205%20%2B%20Tailwind-FF3E00?style=flat-square&logo=svelte" alt="Frontend"></a>
-    <a href="tests/"><img src="https://img.shields.io/badge/Tests-90%20Passed-3fb950?style=flat-square&logo=pytest" alt="Tests"></a>
+    <a href="tests/"><img src="https://img.shields.io/badge/Tests-93%20Passed-3fb950?style=flat-square&logo=pytest" alt="Tests"></a>
   </p>
 
   <!-- 仕様書ナビゲーション (docs/) -->
@@ -56,7 +56,7 @@
 
 | [音声合成] 高品質TTS ＆ 口パク同期 | [プライバシー] ローカル完結 ＆ セキュア通信 |
 | :--- | :--- |
-| ・**Irodori-TTS (24kHz)**: ローカル完結の高品質ゼロショット音声合成<br>・**先行キャッシュパイプライン**: 非同期処理により発話待機時間を最小化<br>・**Web Audio API 口パク連動**: FFT解析による滑らかな口開閉（ParamMouthOpenY）<br>・**感情タイムライン同期**: セリフの感情変化に合わせて表情がリアルタイム遷移 | ・**外部通信ゼロ原則**: 推論・記憶・描画・音声のすべてがPCローカルで完結<br>・**独立認証ゲートウェイ (8090)**: スマホ・タブレットからの安全なリモート操作<br>・**Tailscale メッシュ対応**: ルーターのポート開放なしで外出先からP2P直接通信<br>・**スマートWeb検索**: トグルON時のみ DuckDuckGo / 気象予報を自律取得<br>・<a href="docs/web-search-and-weather.md#実演デモ動画-自律気象検索リアルタイム天気予報取得"><b>実演動画: 自律気象検索＆TTS読み上げ (MP4)</b></a> |
+| ・**Irodori-TTS (24kHz)**: ローカル完結の高品質ゼロショット音声合成<br>・**先行キャッシュパイプライン**: 非同期処理により発話待機時間を最小化<br>・**Web Audio API 口パク連動**: FFT解析による滑らかな口開閉（ParamMouthOpenY）<br>・**感情タイムライン同期**: セリフの感情変化に合わせて表情がリアルタイム遷移 | ・**限定的な外部通信（ローカル完結設計）**: 推論・記憶・描画・音声はPCローカルで完結（外部通信は明示的な操作時のみに限定、全通信先はdocsに開示）<br>・**独立認証ゲートウェイ (8090)**: スマホ・タブレットからの安全なリモート操作<br>・**Tailscale メッシュ対応**: ルーターのポート開放なしで外出先からP2P直接通信<br>・**スマートWeb検索**: トグルON時のみ DuckDuckGo / 気象予報を自律取得<br>・<a href="docs/web-search-and-weather.md#実演デモ動画-自律気象検索リアルタイム天気予報取得"><b>実演動画: 自律気象検索＆TTS読み上げ (MP4)</b></a> |
 
 ---
 
