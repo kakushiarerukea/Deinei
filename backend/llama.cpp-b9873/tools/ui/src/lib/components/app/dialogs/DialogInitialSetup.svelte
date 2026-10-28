@@ -16,7 +16,7 @@
 		Pencil
 	} from '@lucide/svelte';
 	import { Textarea } from '$lib/components/ui/textarea';
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { t, i18n, type SupportedLocale } from '$lib/stores/i18n.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { SETTINGS_KEYS } from '$lib/constants/settings-keys';
@@ -51,6 +51,7 @@
 	type PromptStep = 'initial' | 'confirm' | 'editing' | 'saved';
 	let promptStep = $state<PromptStep>('initial');
 	let customPromptText = $state('');
+	let wasOpen = false;
 
 	function loadCurrentSettings() {
 		selectedLocale = i18n.currentLocale;
@@ -82,7 +83,7 @@
 			const normCurrent = currentPrompt.replace(/\r\n/g, '\n').trim();
 			const normDefault = DEFAULT_SYSTEM_PROMPT.replace(/\r\n/g, '\n').trim();
 			customPromptText = (normCurrent === normDefault || normCurrent.includes('Act as "Haruka"')) ? '' : currentPrompt;
-			promptStep = customPromptText.trim().length > 0 ? 'saved' : 'initial';
+			promptStep = customPromptText.trim().length > 0 ? 'saved' : 'confirm';
 		} else {
 			customPromptText = '';
 			promptStep = 'initial';
@@ -93,8 +94,10 @@
 		if (enable) {
 			isSamplePromptEnabled = true;
 			promptStep = 'initial';
+			localStorage.setItem('deining_sample_prompt_enabled', 'true');
 		} else {
 			isSamplePromptEnabled = false;
+			localStorage.setItem('deining_sample_prompt_enabled', 'false');
 			if (customPromptText.trim().length > 0) {
 				promptStep = 'saved';
 			} else {
@@ -104,8 +107,14 @@
 	}
 
 	$effect(() => {
-		if (open) {
-			loadCurrentSettings();
+		const isOpen = open;
+		if (isOpen && !wasOpen) {
+			wasOpen = true;
+			untrack(() => {
+				loadCurrentSettings();
+			});
+		} else if (!isOpen) {
+			wasOpen = false;
 		}
 	});
 
