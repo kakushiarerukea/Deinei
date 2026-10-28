@@ -45,7 +45,7 @@
 ---
 
 > [!NOTE]
-> **【Transparency & Local-First Privacy Design】**
+> **[Transparency & Local-First Privacy Design]**
 > All core components of this software—LLM inference, vector database (ChromaDB), Live2D/VRM 3D rendering, and TTS audio synthesis—run entirely locally on your machine.
 > External network connections occur only during "initial setup", when the "Web search toggle is ON", and during "on-demand STT model download on first microphone use".
 > For explicit domains, port configurations, and network isolation controls, please refer to [docs/external-connections.md](docs/external-connections.md).
@@ -56,37 +56,37 @@
 
 | [Long-Term Memory & RAG] Parent-Child Retrieval | [Avatar] Live2D & 3D VRM Dual Engine |
 | :--- | :--- |
-| ・**16-Block Forgetting Sliding**: Compresses every 30 messages into 300–500 token summary blocks.<br>・**Parent-Child Retrieval (ChromaDB)**: Dual-query two-tier search (Fact & Episode) using `ruri-v3-310m`.<br>・**Directed Tree Worldline Isolation**: Branch rewinding and edits never pollute memories across parallel branches.<br>・**Dynamic Relative Timestamps**: Injects contextual tags (`[Just now]`, `[3 days ago]`) at inference time. | ・**3D VRM Engine (Three.js + three-vrm)**: Procedural breathing, finger relaxation curves, and gaze tracking.<br>・**Live2D Cubism 3/4**: Screen-ratio auto-scaling with GUI touch-zone hitbox editing.<br>・**Intuitive Setup**: Simply drag & drop your `.vrm` file or recommended Live2D ZIP directly onto the screen.<br>・<a href="docs/avatar-and-audio.md#実演デモ動画-なでなでインタラクション表情変化"><b>Demo Video: Headpat interaction & expression changes (MP4)</b></a> |
+| • **16-Block Forgetting Sliding**: Compresses every 30 messages into 300–500 token summary blocks.<br>• **Parent-Child Retrieval (ChromaDB)**: Dual-query two-tier search (Fact & Episode) using `ruri-v3-310m`.<br>• **Directed Tree Worldline Isolation**: Branch rewinding and edits prevent memory pollution across parallel branches.<br>• **Dynamic Relative Timestamps**: Injects contextual tags (`[Just now]`, `[3 days ago]`) at inference time. | • **3D VRM Engine (Three.js + three-vrm)**: Procedural breathing, finger relaxation curves, and gaze tracking.<br>• **Live2D Cubism 3/4**: Screen-ratio auto-scaling with GUI touch-zone hitbox editing.<br>• **Intuitive Setup**: Simply drag & drop your `.vrm` file or recommended Live2D ZIP directly onto the screen.<br>• <a href="docs/avatar-and-audio.md#実演デモ動画-なでなでインタラクション表情変化"><b>Demo Video: Headpat interaction & expression changes (MP4)</b></a> |
 
 | [Speech Synthesis] Zero-Shot TTS & Lip-Sync | [Privacy & Access] Local-First & Remote Gateway |
 | :--- | :--- |
-| ・**Irodori-TTS (24kHz)**: High-fidelity zero-shot speech synthesis running entirely on local GPU.<br>・**Asynchronous Lookahead Pipeline**: Pre-synthesizes upcoming text chunks to eliminate playback pauses.<br>・**Web Audio API Lip-Sync**: FFT frequency analysis for smooth, natural mouth movements (`ParamMouthOpenY`).<br>・**Emotion Timeline Sync**: Transitions avatar facial expressions in real time according to narrative emotion. | ・**Fully Air-Gapped Local Operation**: Core AI processes run strictly on loopback (`127.0.0.1`).<br>・**Isolated Auth Gateway (Port 8090)**: Secure remote access from smartphones and tablets with random tokens.<br>・**Tailscale Mesh Support**: Encrypted P2P remote connection without router port forwarding.<br>・**Smart Autonomous Web Search**: DuckDuckGo / weather forecasts queried dynamically only when toggled ON.<br>・<a href="docs/web-search-and-weather.md#実演デモ動画-自律気象検索リアルタイム天気予報取得"><b>Demo Video: Autonomous weather search & TTS readout (MP4)</b></a> |
+| • **Irodori-TTS (24kHz)**: High-fidelity zero-shot speech synthesis running entirely on local GPU.<br>• **Asynchronous Lookahead Pipeline**: Pre-synthesizes upcoming text chunks to minimize playback latency.<br>• **Web Audio API Lip-Sync**: FFT frequency analysis for smooth, natural mouth movements (`ParamMouthOpenY`).<br>• **Emotion Timeline Sync**: Transitions avatar facial expressions in real time according to narrative emotion. | • **Local-First & Loopback-Isolated Design**: Core AI processes run strictly on loopback (`127.0.0.1`).<br>• **Isolated Auth Gateway (Port 8090)**: Secure remote access from smartphones and tablets with random tokens.<br>• **Tailscale Mesh Support**: Encrypted P2P remote connection without router port forwarding.<br>• **Smart Autonomous Web Search**: DuckDuckGo / weather forecasts queried dynamically only when toggled ON.<br>• <a href="docs/web-search-and-weather.md#実演デモ動画-自律気象検索リアルタイム天気予報取得"><b>Demo Video: Autonomous weather search & TTS readout (MP4)</b></a> |
 
 ---
 
 ## [Quick Start] Installation & Launch
 
 > [!CAUTION]
-> **【CRITICAL】Always extract the downloaded ZIP archive before running.**
+> **[CRITICAL] Always extract the downloaded ZIP archive before running.**
 > Running `install.bat` directly from inside the ZIP file without extracting will execute inside Windows Temp and fail.
 
 ### Step 1: Download and Extract
-1. Download the [ZIP package](../../archive/refs/heads/main.zip) (or the release package `Deinei-v0.1.0-windows-x64.zip`).
+1. Download the release package (e.g., `泥濘（Deinei）v0.1.0.zip` or the repository ZIP).
 2. Right-click the ZIP file and select **"Extract All..."** to a standard folder.
-   - [TIP] We recommend extracting to a short path without spaces or non-ASCII characters (e.g. `C:\deinei` or `D:\deinei`).
+   - [TIP] We recommend extracting to a short path without spaces or non-ASCII characters (e.g., `C:\deinei` or `D:\deinei`).
 
 ### Step 2: Run Automated Setup
 1. Double-click **`install.bat`** in the extracted directory.
    - *If Windows SmartScreen appears, click "More info" -> "Run anyway".*
 2. A console window will guide you through setting up Python (uv), PyTorch/CUDA, llama.cpp, and TTS models automatically.
-3. When prompted: "Do you want to download model files (~15.5GB) now? (y/n)", type `y` and press Enter.
+3. When prompted: `モデル一式 (約15.3GB) を今すぐ自動ダウンロードしますか？ (y/n)` (Do you want to download model files (~15.3GB) now?), type `y` and press Enter.
 4. When `[SUCCESS] Setup Completed!` appears, a shortcut will be created on your desktop.
 
 ### Step 3: Launch
-1. Launch via the **"Start Deinei"** desktop shortcut (or run **`start_ai_servers.bat`**).
+1. Launch via the **"Start Deinei" (泥濘 (Deinei) を起動)** desktop shortcut (or run **`start_ai_servers.bat`**).
 2. The splash window and desktop GUI launcher will open.
 3. Once all services (LLM: 8080, RAG: 5000, TTS: 5001, Gateway: 8090) are initialized, the chat interface opens in your browser automatically.
-   - [TIP] To stop all services, click "Stop All Servers" on the top right of the launcher window.
+   - [TIP] To stop all services, click **"Stop All Servers" (全サーバー停止)** on the top right of the launcher window.
 
 ---
 
@@ -205,12 +205,13 @@ For complete technical specifications, security models, model download instructi
 
 ## [Limitations] Known Limitations
 
-1. **Speech Recognition (STT) is Experimental**: Voice input via `ReazonSpeech-K2` is experimental and may be sensitive to ambient background noise or microphone levels.
-2. **Vision Encoder Enabled by Default Only on 24GB+ GPUs**: Due to VRAM allocation priority, multimodal image recognition (`mmproj`) is enabled by default on 24GB profiles (can be enabled manually on smaller GPUs).
-3. **Designed for 16,384 Context Window**: System prompt, memory injection, raw history window, and generation slots are budgeted for 16k tokens.
-4. **Autonomous Summarization Requires Open Browser**: Memory consolidation is driven client-side by the active WebUI tab; closing the browser suspends ongoing summarization until reopened.
-5. **VRM Gaze is Head-Rotation-Centric**: Eye bone limits depend on the specific VRM model file; gaze tracking is expressed primarily through natural head yaw and pitch.
-6. **VRM Idle Animation is Procedural**: Idle stance (relaxed pose + curved fingers + breathing) is computed programmatically via bone measurements rather than static VRMA animations.
+1. **Current Pipeline is Optimized for Japanese**: In v0.1.0, default models (Irodori-TTS, ruri-v3-310m text embedding, ReazonSpeech-K2 STT) and extended documentation (`docs/*.md`) are tailored specifically for Japanese language environments. Native English pipelines and multilingual models are planned in the roadmap.
+2. **Speech Recognition (STT) is Experimental**: Voice input via `ReazonSpeech-K2` is experimental and may be sensitive to ambient background noise or microphone levels.
+3. **Vision Encoder Enabled by Default Only on 24GB+ GPUs**: Due to VRAM allocation priority, multimodal image recognition (`mmproj`) is enabled by default on 24GB profiles (can be enabled manually on smaller GPUs).
+4. **Designed for 16,384 Context Window**: System prompt, memory injection, raw history window, and generation slots are budgeted for 16k tokens.
+5. **Autonomous Summarization Requires Open Browser**: Memory consolidation is driven client-side by the active WebUI tab; closing the browser suspends ongoing summarization until reopened.
+6. **VRM Gaze is Head-Rotation-Centric**: Eye bone limits depend on the specific VRM model file; gaze tracking is expressed primarily through natural head yaw and pitch.
+7. **VRM Idle Animation is Procedural**: Idle stance (relaxed pose + curved fingers + breathing) is computed programmatically via bone measurements rather than static VRMA animations.
 
 ---
 
