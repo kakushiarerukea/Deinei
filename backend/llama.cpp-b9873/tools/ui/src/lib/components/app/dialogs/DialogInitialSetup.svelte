@@ -66,12 +66,23 @@
 
 		const currentPrompt = (settingsStore.config[SETTINGS_KEYS.SYSTEM_MESSAGE] ?? '').toString().trim();
 		initialCustomPrompt = currentPrompt;
-		const isInitialRun = !localStorage.getItem('deining_initial_setup_completed');
-		isSamplePromptEnabled = isInitialRun || currentPrompt === DEFAULT_SYSTEM_PROMPT.trim();
+
+		const savedSamplePrompt = localStorage.getItem('deining_sample_prompt_enabled');
+		if (savedSamplePrompt !== null) {
+			isSamplePromptEnabled = savedSamplePrompt === 'true';
+		} else {
+			const isInitialRun = !localStorage.getItem('deining_initial_setup_completed');
+			const normCurrent = currentPrompt.replace(/\r\n/g, '\n').trim();
+			const normDefault = DEFAULT_SYSTEM_PROMPT.replace(/\r\n/g, '\n').trim();
+			const isHarukaPrompt = normCurrent.includes('Act as "Haruka"') || normCurrent === normDefault;
+			isSamplePromptEnabled = isInitialRun || isHarukaPrompt;
+		}
 
 		if (!isSamplePromptEnabled) {
-			customPromptText = currentPrompt === DEFAULT_SYSTEM_PROMPT.trim() ? '' : currentPrompt;
-			promptStep = 'saved';
+			const normCurrent = currentPrompt.replace(/\r\n/g, '\n').trim();
+			const normDefault = DEFAULT_SYSTEM_PROMPT.replace(/\r\n/g, '\n').trim();
+			customPromptText = (normCurrent === normDefault || normCurrent.includes('Act as "Haruka"')) ? '' : currentPrompt;
+			promptStep = customPromptText.trim().length > 0 ? 'saved' : 'initial';
 		} else {
 			customPromptText = '';
 			promptStep = 'initial';
@@ -145,9 +156,11 @@
 		if (isSamplePromptEnabled) {
 			targetPrompt = DEFAULT_SYSTEM_PROMPT;
 			settingsStore.updateConfig(SETTINGS_KEYS.SYSTEM_MESSAGE, DEFAULT_SYSTEM_PROMPT);
+			localStorage.setItem('deining_sample_prompt_enabled', 'true');
 		} else {
 			targetPrompt = customPromptText.trim();
 			settingsStore.updateConfig(SETTINGS_KEYS.SYSTEM_MESSAGE, targetPrompt);
+			localStorage.setItem('deining_sample_prompt_enabled', 'false');
 		}
 
 		// 現在開いている会話のシステムメッセージがあれば即座に更新
@@ -450,14 +463,14 @@
 						<button
 							type="button"
 							class="px-2.5 py-1 text-xs font-medium rounded-md transition-all cursor-pointer {isSamplePromptEnabled ? 'bg-purple-600 text-white shadow-sm font-semibold' : 'text-muted-foreground hover:text-foreground'}"
-							onclick={() => handleToggleSamplePrompt(true)}
+							onclick={(e) => { e.stopPropagation(); handleToggleSamplePrompt(true); }}
 						>
 							ON
 						</button>
 						<button
 							type="button"
 							class="px-2.5 py-1 text-xs font-medium rounded-md transition-all cursor-pointer {!isSamplePromptEnabled ? 'bg-background text-foreground shadow-sm font-semibold' : 'text-muted-foreground hover:text-foreground'}"
-							onclick={() => handleToggleSamplePrompt(false)}
+							onclick={(e) => { e.stopPropagation(); handleToggleSamplePrompt(false); }}
 						>
 							OFF
 						</button>
