@@ -11,8 +11,11 @@
 		Layers,
 		Bot,
 		Check,
-		Info
+		Info,
+		HelpCircle,
+		Pencil
 	} from '@lucide/svelte';
+	import { Textarea } from '$lib/components/ui/textarea';
 	import { onMount } from 'svelte';
 	import { t, i18n, type SupportedLocale } from '$lib/stores/i18n.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
@@ -45,6 +48,10 @@
 	let isSamplePromptEnabled = $state(true);
 	let initialCustomPrompt = $state('');
 
+	type PromptStep = 'initial' | 'confirm' | 'editing' | 'saved';
+	let promptStep = $state<PromptStep>('initial');
+	let customPromptText = $state('');
+
 	function loadCurrentSettings() {
 		selectedLocale = i18n.currentLocale;
 
@@ -61,6 +68,28 @@
 		initialCustomPrompt = currentPrompt;
 		const isInitialRun = !localStorage.getItem('deining_initial_setup_completed');
 		isSamplePromptEnabled = isInitialRun || currentPrompt === DEFAULT_SYSTEM_PROMPT.trim();
+
+		if (!isSamplePromptEnabled) {
+			customPromptText = currentPrompt === DEFAULT_SYSTEM_PROMPT.trim() ? '' : currentPrompt;
+			promptStep = 'saved';
+		} else {
+			customPromptText = '';
+			promptStep = 'initial';
+		}
+	}
+
+	function handleToggleSamplePrompt(enable: boolean) {
+		if (enable) {
+			isSamplePromptEnabled = true;
+			promptStep = 'initial';
+		} else {
+			isSamplePromptEnabled = false;
+			if (customPromptText.trim().length > 0) {
+				promptStep = 'saved';
+			} else {
+				promptStep = 'confirm';
+			}
+		}
 	}
 
 	$effect(() => {
@@ -117,15 +146,8 @@
 			targetPrompt = DEFAULT_SYSTEM_PROMPT;
 			settingsStore.updateConfig(SETTINGS_KEYS.SYSTEM_MESSAGE, DEFAULT_SYSTEM_PROMPT);
 		} else {
-			// オフの場合：初期値がデフォルトプロンプトだったものをオフにした場合は空文字に設定
-			if (!initialCustomPrompt || initialCustomPrompt === DEFAULT_SYSTEM_PROMPT.trim()) {
-				targetPrompt = '';
-				settingsStore.updateConfig(SETTINGS_KEYS.SYSTEM_MESSAGE, '');
-			} else {
-				// ユーザー独自のカスタムプロンプトが入っていた場合はそのまま維持
-				targetPrompt = initialCustomPrompt;
-				settingsStore.updateConfig(SETTINGS_KEYS.SYSTEM_MESSAGE, initialCustomPrompt);
-			}
+			targetPrompt = customPromptText.trim();
+			settingsStore.updateConfig(SETTINGS_KEYS.SYSTEM_MESSAGE, targetPrompt);
 		}
 
 		// 現在開いている会話のシステムメッセージがあれば即座に更新
@@ -397,11 +419,7 @@
 
 			<!-- Option 5: デフォルトのサンプルシステムプロンプト (Sample System Prompt) -->
 			<div
-				role="button"
-				tabindex="0"
-				class="rounded-xl border p-2.5 px-3.5 transition-all cursor-pointer select-none {isSamplePromptEnabled ? 'border-primary/40 bg-primary/[0.03] shadow-xs' : 'border-border/50 bg-card/40 opacity-80 hover:border-border/80'}"
-				onclick={() => { isSamplePromptEnabled = !isSamplePromptEnabled; }}
-				onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); isSamplePromptEnabled = !isSamplePromptEnabled; } }}
+				class="rounded-xl border p-2.5 px-3.5 transition-all {isSamplePromptEnabled ? 'border-primary/40 bg-primary/[0.03] shadow-xs' : 'border-border/50 bg-card/40'}"
 			>
 				<div class="flex items-center justify-between gap-3 mb-1">
 					<div class="flex items-center gap-2.5">
@@ -412,9 +430,19 @@
 							<span class="text-sm font-semibold text-foreground">
 								{t('setup.wizard.systemPrompt', '5. サンプルシステムプロンプト')}
 							</span>
-							<Badge variant="secondary" class="text-[10px] px-1.5 py-0 h-4 bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20">
-								{selectedLocale === 'ja' ? '一般的な恋人との対話' : 'Romantic Partner'}
-							</Badge>
+							{#if isSamplePromptEnabled}
+								<Badge variant="secondary" class="text-[10px] px-1.5 py-0 h-4 bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20">
+									{selectedLocale === 'ja' ? '一般的な恋人との対話' : 'Romantic Partner'}
+								</Badge>
+							{:else if customPromptText.trim().length > 0}
+								<Badge variant="secondary" class="text-[10px] px-1.5 py-0 h-4 bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20">
+									{t('setup.wizard.customPromptSet', { chars: customPromptText.trim().length }, `カスタム設定中 (${customPromptText.trim().length}文字)`)}
+								</Badge>
+							{:else}
+								<Badge variant="outline" class="text-[10px] px-1.5 py-0 h-4 text-muted-foreground border-border/60">
+									{t('setup.wizard.noPromptSet', 'システムプロンプトなし')}
+								</Badge>
+							{/if}
 						</div>
 					</div>
 					<!-- ON / OFF Buttons -->
@@ -422,47 +450,164 @@
 						<button
 							type="button"
 							class="px-2.5 py-1 text-xs font-medium rounded-md transition-all cursor-pointer {isSamplePromptEnabled ? 'bg-purple-600 text-white shadow-sm font-semibold' : 'text-muted-foreground hover:text-foreground'}"
-							onclick={(e) => { e.stopPropagation(); isSamplePromptEnabled = true; }}
+							onclick={() => handleToggleSamplePrompt(true)}
 						>
 							ON
 						</button>
 						<button
 							type="button"
 							class="px-2.5 py-1 text-xs font-medium rounded-md transition-all cursor-pointer {!isSamplePromptEnabled ? 'bg-background text-foreground shadow-sm font-semibold' : 'text-muted-foreground hover:text-foreground'}"
-							onclick={(e) => { e.stopPropagation(); isSamplePromptEnabled = false; }}
+							onclick={() => handleToggleSamplePrompt(false)}
 						>
 							OFF
 						</button>
 					</div>
 				</div>
-				<div class="pl-7 flex flex-col gap-1">
+				<div class="pl-7 flex flex-col gap-1.5">
 					<p class="text-[11px] text-muted-foreground leading-snug">
-						{t('setup.wizard.systemPromptDesc', '泥濘推奨のキャラクター対話設定（一般的な恋人との対話）を適用します。')}
+						{isSamplePromptEnabled
+							? t('setup.wizard.systemPromptDesc', '泥濘推奨のキャラクター対話設定（一般的な恋人との対話）を適用します。')
+							: (selectedLocale === 'ja'
+								? 'サンプルプロンプトはOFFになっています。'
+								: 'Sample system prompt is turned OFF.')}
 					</p>
-					<div class="flex items-center gap-1.5 text-[11px] text-purple-600 dark:text-purple-400/90 font-medium">
-						<Tooltip.Root delayDuration={50}>
-							<Tooltip.Trigger
-								class="inline-flex items-center gap-1 hover:underline cursor-pointer group"
-								onclick={(e) => e.stopPropagation()}
-							>
-								<span class="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 group-hover:bg-purple-500/20 transition-colors">
-									<Info class="w-2.5 h-2.5 shrink-0" />
+
+					<!-- サンプルON時の情景描写ヒント -->
+					{#if isSamplePromptEnabled}
+						<div class="flex items-center gap-1.5 text-[11px] text-purple-600 dark:text-purple-400/90 font-medium">
+							<Tooltip.Root delayDuration={50}>
+								<Tooltip.Trigger
+									class="inline-flex items-center gap-1 hover:underline cursor-pointer group"
+								>
+									<span class="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 group-hover:bg-purple-500/20 transition-colors">
+										<Info class="w-2.5 h-2.5 shrink-0" />
+									</span>
+									<span>{selectedLocale === 'ja' ? '情景描写（**）のフロント連動について' : 'About scenery descriptions (**) in UI'}</span>
+								</Tooltip.Trigger>
+								<Tooltip.Content side="top" align="start" class="max-w-xs p-3.5 bg-popover/95 backdrop-blur-md border border-border shadow-xl text-foreground text-xs rounded-xl z-[9999]">
+									<div class="font-semibold mb-1 text-primary flex items-center gap-1.5 text-xs">
+										<Sparkles class="w-3.5 h-3.5" />
+										{selectedLocale === 'ja' ? '情景描写 (** / * *) のフロント連動' : 'Scenery Tag Parsing'}
+									</div>
+									<div class="text-[11px] text-muted-foreground leading-relaxed">
+										{selectedLocale === 'ja'
+											? 'プロンプトに指定されている「**」（または「* *」）で囲まれた情景描写（例：*窓の外で雨足が強まる*）は、フロントエンド側で自動的に抽出・認識され、セリフとは区別された美しい情景描写として画面に演出表示されます。'
+											: 'Scenery narrative enclosed in ** or * * (e.g. *rain starts falling outside*) is automatically parsed by the frontend, styled distinctly as an ambient scenery element.'}
+									</div>
+								</Tooltip.Content>
+							</Tooltip.Root>
+						</div>
+					{/if}
+
+					<!-- サンプルOFF時のインタラクションUI -->
+					{#if !isSamplePromptEnabled}
+						{#if promptStep === 'confirm'}
+							<!-- 確認ステップ: 作成するか聞く -->
+							<div class="mt-2 p-3 rounded-lg bg-muted/40 border border-border/60 flex flex-col gap-2">
+								<div class="flex items-start gap-2">
+									<HelpCircle class="w-4 h-4 text-primary shrink-0 mt-0.5" />
+									<div class="flex flex-col gap-0.5">
+										<span class="text-xs font-semibold text-foreground">
+											{t('setup.wizard.promptConfirmTitle', '新規システムメッセージを作成しますか？')}
+										</span>
+										<span class="text-[11px] text-muted-foreground leading-relaxed">
+											{t('setup.wizard.promptConfirmDesc', 'サンプルプロンプト（恋人設定）をオフにしました。独自のキャラクター設定や前提指示（システムプロンプト）を今すぐ入力・作成しますか？')}
+										</span>
+									</div>
+								</div>
+								<div class="flex items-center gap-2 pt-1">
+									<Button
+										type="button"
+										size="sm"
+										variant="default"
+										class="h-7 text-xs px-3 font-medium bg-primary text-primary-foreground hover:bg-primary/90 flex items-center gap-1.5 cursor-pointer"
+										onclick={() => { promptStep = 'editing'; }}
+									>
+										<Pencil class="w-3 h-3" />
+										{t('setup.wizard.promptConfirmCreate', '新規プロンプトを入力する')}
+									</Button>
+									<Button
+										type="button"
+										size="sm"
+										variant="ghost"
+										class="h-7 text-xs px-2.5 text-muted-foreground hover:text-foreground cursor-pointer"
+										onclick={() => { promptStep = 'saved'; customPromptText = ''; }}
+									>
+										{t('setup.wizard.promptConfirmSkip', 'プロンプトなしで開始')}
+									</Button>
+								</div>
+							</div>
+						{:else if promptStep === 'editing'}
+							<!-- 編集ステップ: テキストエリアで入力 -->
+							<div class="mt-2 p-3 rounded-lg bg-card border border-primary/30 flex flex-col gap-2 shadow-xs">
+								<div class="flex items-center justify-between gap-2">
+									<span class="text-xs font-semibold text-foreground flex items-center gap-1.5">
+										<Pencil class="w-3.5 h-3.5 text-primary" />
+										{t('setup.wizard.promptInputTitle', 'カスタムシステムプロンプトの入力')}
+									</span>
+									<span class="text-[10px] text-muted-foreground">
+										{customPromptText.length} 文字
+									</span>
+								</div>
+								<p class="text-[11px] text-muted-foreground">
+									{t('setup.wizard.promptInputDesc', 'AIの性格、口調、役割、前提条件などの指示を入力してください。後から設定画面でもいつでも変更できます。')}
+								</p>
+								<Textarea
+									bind:value={customPromptText}
+									placeholder={t('setup.wizard.promptInputPlaceholder', '例:\nあなたは親切で落ち着いたAIアシスタントです。\n名前: ○○\n一人称: 私\n丁寧な言葉遣いで回答してください。')}
+									rows={5}
+									class="text-xs font-mono leading-relaxed resize-y bg-background border-border/80"
+								/>
+								<div class="flex items-center justify-end gap-2 pt-1">
+									<Button
+										type="button"
+										size="sm"
+										variant="ghost"
+										class="h-7 text-xs px-2.5 text-muted-foreground hover:text-foreground cursor-pointer"
+										onclick={() => { promptStep = 'saved'; }}
+									>
+										{t('setup.wizard.promptInputCancel', 'キャンセル')}
+									</Button>
+									<Button
+										type="button"
+										size="sm"
+										variant="default"
+										class="h-7 text-xs px-3 font-medium bg-primary text-primary-foreground hover:bg-primary/90 flex items-center gap-1 cursor-pointer"
+										onclick={() => { promptStep = 'saved'; }}
+									>
+										<Check class="w-3.5 h-3.5" />
+										{t('setup.wizard.promptInputApply', '適用する')}
+									</Button>
+								</div>
+							</div>
+						{:else if promptStep === 'saved'}
+							<!-- 確定・保存済みの状態表示 -->
+							<div class="mt-1 flex items-center justify-between gap-2 p-2 rounded-lg bg-muted/30 border border-border/40">
+								<span class="text-xs text-muted-foreground flex items-center gap-1.5 min-w-0">
+									{#if customPromptText.trim().length > 0}
+										<Check class="w-3.5 h-3.5 text-green-500 shrink-0" />
+										<span class="text-foreground font-medium truncate max-w-[260px]">
+											{customPromptText.trim().replace(/\n/g, ' ')}
+										</span>
+									{:else}
+										<span class="text-muted-foreground">
+											{t('setup.wizard.noPromptSet', 'システムプロンプトなし（まっさらな状態）')}
+										</span>
+									{/if}
 								</span>
-								<span>{selectedLocale === 'ja' ? '情景描写（**）のフロント連動について' : 'About scenery descriptions (**) in UI'}</span>
-							</Tooltip.Trigger>
-							<Tooltip.Content side="top" align="start" class="max-w-xs p-3.5 bg-popover/95 backdrop-blur-md border border-border shadow-xl text-foreground text-xs rounded-xl z-[9999]">
-								<div class="font-semibold mb-1 text-primary flex items-center gap-1.5 text-xs">
-									<Sparkles class="w-3.5 h-3.5" />
-									{selectedLocale === 'ja' ? '情景描写 (** / * *) のフロント連動' : 'Scenery Tag Parsing'}
-								</div>
-								<div class="text-[11px] text-muted-foreground leading-relaxed">
-									{selectedLocale === 'ja'
-										? 'プロンプトに指定されている「**」（または「* *」）で囲まれた情景描写（例：*窓の外で雨足が強まる*）は、フロントエンド側で自動的に抽出・認識され、セリフとは区別された美しい情景描写として画面に演出表示されます。'
-										: 'Scenery narrative enclosed in ** or * * (e.g. *rain starts falling outside*) is automatically parsed by the frontend, styled distinctly as an ambient scenery element.'}
-								</div>
-							</Tooltip.Content>
-						</Tooltip.Root>
-					</div>
+								<Button
+									type="button"
+									size="sm"
+									variant="ghost"
+									class="h-6 text-[11px] px-2 text-primary hover:text-primary/90 hover:bg-primary/10 cursor-pointer shrink-0"
+									onclick={() => { promptStep = 'editing'; }}
+								>
+									<Pencil class="w-3 h-3 mr-1" />
+									{customPromptText.trim().length > 0 ? t('setup.wizard.editCustomPrompt', '編集する') : t('setup.wizard.enterCustomPrompt', '新規プロンプトを入力')}
+								</Button>
+							</div>
+						{/if}
+					{/if}
 				</div>
 			</div>
 		</div>

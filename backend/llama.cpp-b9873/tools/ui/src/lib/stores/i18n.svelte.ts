@@ -179,7 +179,21 @@ export const translations: Record<SupportedLocale, Record<string, string>> = {
 		'sidebar.deleteConfirm': 'Delete "{name}"? This action cannot be undone.',
 		'sidebar.openSidebar': 'Open Sidebar',
 		'sidebar.closeSidebar': 'Close Sidebar',
-		'sidebar.openMenu': 'Open Menu'
+		'sidebar.openMenu': 'Open Menu',
+		// --- Initial Setup Wizard Custom Prompt ---
+		'setup.wizard.promptConfirmTitle': 'Create Custom System Prompt?',
+		'setup.wizard.promptConfirmDesc': 'You turned off the sample prompt. Would you like to enter your own custom system message (system prompt) now?',
+		'setup.wizard.promptConfirmCreate': 'Enter Custom Prompt',
+		'setup.wizard.promptConfirmSkip': 'Start Without Prompt',
+		'setup.wizard.promptInputTitle': 'Custom System Prompt',
+		'setup.wizard.promptInputDesc': 'Enter instructions, persona, or rules for the AI. You can always change this later in Settings.',
+		'setup.wizard.promptInputPlaceholder': 'e.g.\nYou are a helpful and polite AI assistant.\nName: Nova\nTone: Professional and friendly',
+		'setup.wizard.promptInputApply': 'Apply',
+		'setup.wizard.promptInputCancel': 'Cancel',
+		'setup.wizard.customPromptSet': 'Custom prompt configured ({chars} chars)',
+		'setup.wizard.noPromptSet': 'No system prompt (Plain AI)',
+		'setup.wizard.editCustomPrompt': 'Edit Prompt',
+		'setup.wizard.enterCustomPrompt': 'Enter Prompt'
 	},
 	ja: {
 		// --- General & Settings ---
@@ -352,7 +366,21 @@ export const translations: Record<SupportedLocale, Record<string, string>> = {
 		'sidebar.deleteConfirm': '「{name}」を削除しますか？この操作は取り消せません。',
 		'sidebar.openSidebar': 'サイドバーを開く',
 		'sidebar.closeSidebar': 'サイドバーを閉じる',
-		'sidebar.openMenu': 'メニューを開く'
+		'sidebar.openMenu': 'メニューを開く',
+		// --- Initial Setup Wizard Custom Prompt ---
+		'setup.wizard.promptConfirmTitle': '新規システムメッセージを作成しますか？',
+		'setup.wizard.promptConfirmDesc': 'サンプルプロンプト（恋人設定）をオフにしました。独自のキャラクター設定や前提指示（システムプロンプト）を今すぐ入力・作成しますか？',
+		'setup.wizard.promptConfirmCreate': '新規プロンプトを入力する',
+		'setup.wizard.promptConfirmSkip': 'プロンプトなしで開始',
+		'setup.wizard.promptInputTitle': 'カスタムシステムプロンプトの入力',
+		'setup.wizard.promptInputDesc': 'AIの性格、口調、役割、前提条件などの指示を入力してください。後から設定画面でもいつでも変更できます。',
+		'setup.wizard.promptInputPlaceholder': '例:\nあなたは親切で落ち着いたAIアシスタントです。\n名前: ○○\n一人称: 私\n丁寧な言葉遣いで回答してください。',
+		'setup.wizard.promptInputApply': '適用する',
+		'setup.wizard.promptInputCancel': 'キャンセル',
+		'setup.wizard.customPromptSet': 'カスタム設定中 ({chars}文字)',
+		'setup.wizard.noPromptSet': 'システムプロンプトなし（まっさらな状態）',
+		'setup.wizard.editCustomPrompt': '編集する',
+		'setup.wizard.enterCustomPrompt': '新規プロンプトを入力'
 	}
 };
 
