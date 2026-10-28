@@ -14,9 +14,9 @@
 - **ダウンロード元**: [Hugging Face: Goetia-26B-A4B-v1.7-i1-GGUF](https://huggingface.co/mradermacher/Goetia-26B-A4B-v1.7-i1-GGUF)
 
 ### 1.2 Vision エンコーダ (画像認識用)
-- **推奨モデル**: `mmproj-BF16.gguf`（約0.93GB。配布元の現行ファイル）
+- **推奨モデル**: `mmproj-BF16.gguf`（約1.19GB。Gemma 4 / Goetia 26B 適合マルチモーダルプロジェクタ）
 - **配置先**: `llama-b9873-bin-win-cuda-13.3-x64sandbox/` 直下
-- **ダウンロード元**: [Hugging Face: Melody1437-27B-GGUF (mmproj)](https://huggingface.co/mradermacher/Melody1437-27B-GGUF)
+- **ダウンロード元**: [Hugging Face: unsloth/gemma-4-26B-A4B-it-GGUF (mmproj-BF16.gguf)](https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF)
 - **有効化設定**:
   - Visionエンコーダは環境構築時に一括取得されますが、VRAM消費を抑え最速の推論速度を維持するため、既定では24GB（Ultra）プロファイルでのみ有効化されます。
   - 22GB未満環境（8GB〜16GB）でも、`deining_profile.bat` の `MMPROJ_ARGS` を手動編集（`set MMPROJ_ARGS=--mmproj mmproj-BF16.gguf`）することで手動有効化が可能です。
@@ -69,7 +69,7 @@ RTX 5070 Ti (16GB VRAM) / 32GB RAM / NVIDIA Driver 616.92 / 16GBプロファイ�
 - コミットは `Get-Process` の Private Memory の実測値です。ワーキングセットはOSのトリミングで変動するため、要件の判定には使いません。
 - 物理RAMは32GB以上を推奨します（全プロセスを物理RAM内に余裕で常駐可能）。16GB環境でも、十分なページファイルとSSD空き容量を確保することで、VRAM 8GB + RAM 16GB環境にて実測約30 TPSの動作を確認しています（SSDの空き容量・ページファイルの事前確保を推奨）。
 - 数値はプロファイルで変動します。24GBプロファイルはTTSがBF16（モデル約3.1GB）になり、Visionが有効になります。8GBプロファイルは `-ncmoe 20` でCPU側のRAM使用量が増えます。
-- ストレージは、モデル（LLM 14.3GB + mmproj 0.93GB + TTS 0.9GB/3.1GB）とPython環境（PyTorch CUDA含む）、キャッシュを含めて30GB以上（推奨40GB）を確保してください。実測したリポジトリ全体は約24.0GB（TTS用venv 5.0GB、HFキャッシュ1.7GBを含む）です。統合venv構成ではこれより増えます。
+- ストレージは、モデル（LLM 14.3GB + mmproj 1.19GB + TTS 0.9GB/3.1GB）とPython環境（PyTorch CUDA含む）、キャッシュを含めて30GB以上（推奨40GB）を確保してください。実測したリポジトリ全体は約24.0GB（TTS用venv 5.0GB、HFキャッシュ1.7GBを含む）です。統合venv構成ではこれより増えます。
 - CUDA Toolkitのインストールは不要です（`cudart-llama-bin-win-cuda-13.3-x64.zip` のDLLを同梱）。Python 3.10は `uv` が自動取得し、Node.jsも不要です（WebUIはビルド済み）。
 - インストーラーが自動判定するのはVRAMのみです。RAM・空き容量・ドライバ・AVX2・WebView2・VC++ランタイムは自動検証しません。READMEの動作要件表とあわせて事前に確認してください。
 

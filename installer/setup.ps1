@@ -910,10 +910,10 @@ $llmModelUrl = "https://huggingface.co/mradermacher/Goetia-26B-A4B-v1.7-i1-GGUF/
 
 $mmprojModelName = "mmproj-BF16.gguf"
 $mmprojModelPath = Join-Path $llamaDir $mmprojModelName
-$mmprojModelUrl = "https://huggingface.co/mradermacher/Melody1437-27B-GGUF/resolve/main/Melody1437-27B.mmproj-f16.gguf?download=true"
+$mmprojModelUrl = "https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/main/mmproj-BF16.gguf"
 
 $hasLlm = (Test-Path $llmModelPath) -or (Test-Path (Join-Path $llamaDir "Melody1437-26B-A4B.i1-IQ4_XS.gguf")) -or (Test-Path (Join-Path $llamaDir "Melody1437-27B.i1-IQ4_XS.gguf"))
-$hasMmproj = (Test-Path $mmprojModelPath) -or (Test-Path (Join-Path $llamaDir "Melody1437-27B.mmproj-f16.gguf"))
+$hasMmproj = (Test-Path $mmprojModelPath)
 
 if ($hasLlm -and $hasMmproj) {
     Write-Host "`n  [OK] Recommended LLM model and Vision encoder are ready in sandbox." -ForegroundColor Green
@@ -925,16 +925,16 @@ if ($hasLlm -and $hasMmproj) {
     Write-Host "  泥濘システム推奨の対話モデル本体およびVisionエンコーダを取得できます。"
     Write-Host "  You can download the recommended LLM dialogue model and Vision encoder."
     Write-Host "  - LLM モデル本体 / Main LLM:     $llmModelName (約14.3GB)" -ForegroundColor Cyan
-    Write-Host "  - Vision エンコーダ / Vision:    $mmprojModelName (約0.93GB / マルチモーダル画像認識用)" -ForegroundColor Cyan
+    Write-Host "  - Vision エンコーダ / Vision:    $mmprojModelName (約1.19GB / マルチモーダル画像認識用)" -ForegroundColor Cyan
     Write-Host "  ※Visionエンコーダは24GB環境のみ既定有効ですが、全環境で取得され deining_profile.bat で手動ONが可能です。" -ForegroundColor DarkGray
-    Write-Host "  ※ダウンロードサイズは【約15.3GB】（LLM本体: 約14.3GB + Vision: 約0.93GB）と大容量です。" -ForegroundColor Yellow
-    Write-Host "  * Total download size is approx 15.3GB (Main LLM: ~14.3GB + Vision: ~0.93GB)." -ForegroundColor Yellow
+    Write-Host "  ※ダウンロードサイズは【約15.5GB】（LLM本体: 約14.3GB + Vision: 約1.19GB）と大容量です。" -ForegroundColor Yellow
+    Write-Host "  * Total download size is approx 15.3GB (Main LLM: ~14.3GB + Vision: ~1.19GB)." -ForegroundColor Yellow
     Write-Host "  ※安定した高速インターネット回線とディスクの空き容量を十分にご確認ください。" -ForegroundColor Yellow
     Write-Host "  * Please ensure a fast, stable internet connection and sufficient disk space." -ForegroundColor Yellow
 
     $dlConfirm = Prompt-YesNo `
-        -PromptJa "モデル一式 (約15.3GB) を今すぐ自動ダウンロードしますか？" `
-        -PromptEn "Do you want to download the model package (~15.3GB) now?"
+        -PromptJa "モデル一式 (約15.5GB) を今すぐ自動ダウンロードしますか？" `
+        -PromptEn "Do you want to download the model package (~15.5GB) now?"
 
     if ($dlConfirm) {
         # 1. LLM Model
@@ -954,7 +954,7 @@ if ($hasLlm -and $hasMmproj) {
 
         # 2. Vision Encoder (初期設定で無効なプロファイルでも将来・上位設定用に同梱配置)
         if (-not (Test-Path $mmprojModelPath)) {
-            Write-Host "`n  [DOWNLOAD 2/2] Downloading Vision encoder: $mmprojModelName (~0.93GB)..." -ForegroundColor Cyan
+            Write-Host "`n  [DOWNLOAD 2/2] Downloading Vision encoder: $mmprojModelName (~1.19GB)..." -ForegroundColor Cyan
             try {
                 & curl.exe -L -o $mmprojModelPath $mmprojModelUrl --progress-bar
                 if (Test-Path $mmprojModelPath) {
