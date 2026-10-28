@@ -1174,50 +1174,72 @@ function showLive2DGuidance() {
         const isBrown = cachedAvatarData.includes('fav_usaneko') || cachedAvatarData.includes('茶髪の癒し系お姉さん');
 
         return `
-            <h3 style="font-size: 16px; font-weight: 700; color: #f8fafc; margin-bottom: 8px; letter-spacing: -0.01em;">Live2Dモデルが未配置です</h3>
-            
-            <div id="deining-drop-box" style="margin: 8px 0; padding: 16px 12px; background: rgba(0, 0, 0, 0.4); border: 2px dashed rgba(168, 85, 247, 0.6); border-radius: 14px; width: 100%; max-width: 320px; pointer-events: none; transition: all 0.2s ease;">
-                <svg style="width: 26px; height: 26px; margin: 0 auto 6px auto; stroke: #c084fc; display: block;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-                <div style="font-size: 13px; font-weight: 600; color: #f1f5f9; margin-bottom: 3px;">ここにダウンロードしたZIPを<br>ドロップしてね！</div>
-                <div style="font-size: 11px; color: #a5b4fc; text-decoration: underline;">（またはここをクリックしてファイルを選択）</div>
-            </div>
+            <div style="width: 100%; max-width: 320px; display: flex; flex-direction: column; align-items: center;">
+                <h3 style="font-size: 15px; font-weight: 700; color: #f8fafc; margin-bottom: 2px; letter-spacing: -0.01em;">アバターモデルが未配置です</h3>
+                <p style="font-size: 11px; color: #94a3b8; margin: 0 0 10px 0;">3D（VRM）または 2D（Live2D）を配置して会話を開始できます</p>
 
-            <div style="font-size: 11px; color: #c084fc; background: rgba(168, 85, 247, 0.15); padding: 3px 12px; border-radius: 9999px; border: 1px solid rgba(168, 85, 247, 0.3); margin-bottom: 10px;">
-                銀髪の女の子 / 茶髪の癒し系お姉さん 専用
-            </div>
-
-            <div id="deining-model-links-container" style="width: 100%; max-width: 320px; display: flex; flex-direction: column; gap: 6px; text-align: left;">
-                <div style="font-size: 11px; font-weight: 600; color: #94a3b8; display: flex; align-items: center; justify-content: space-between; padding: 0 4px;">
-                    <span>モデル配布先（ダウンロード無料）</span>
-                    <span style="font-size: 10px; color: #64748b;">vtem.jp</span>
+                <div id="deining-drop-box" style="margin: 0 0 10px 0; padding: 12px 10px; background: rgba(0, 0, 0, 0.4); border: 2px dashed rgba(168, 85, 247, 0.6); border-radius: 12px; width: 100%; pointer-events: none; transition: all 0.2s ease;">
+                    <svg style="width: 24px; height: 24px; margin: 0 auto 4px auto; stroke: #c084fc; display: block;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                    <div style="font-size: 12px; font-weight: 600; color: #f1f5f9; margin-bottom: 2px;">ここに .vrm または 推奨Live2DのZIP をドロップ</div>
+                    <div style="font-size: 10px; color: #a5b4fc; text-decoration: underline;">（またはここをクリックしてファイルを選択）</div>
                 </div>
 
-                <a href="https://vtem.jp/listing/model_0005_favorite/" target="_blank" rel="noopener noreferrer" class="deining-model-dl-btn" style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: rgba(30, 27, 75, 0.5); border: 1px solid ${isBrown ? 'rgba(168, 85, 247, 0.6)' : 'rgba(255, 255, 255, 0.12)'}; border-radius: 10px; color: #e2e8f0; text-decoration: none; font-size: 12px; transition: all 0.2s ease; cursor: pointer;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #d97706; box-shadow: 0 0 6px rgba(217, 119, 6, 0.8);"></span>
-                        <span style="font-weight: 600;">茶髪の癒し系お姉さん</span>
-                        ${isBrown ? '<span style="font-size: 9px; padding: 1px 6px; border-radius: 9999px; background: rgba(168, 85, 247, 0.35); color: #f3e8ff; border: 1px solid rgba(168, 85, 247, 0.5);">選択中</span>' : ''}
+                <div style="width: 100%; display: flex; flex-direction: column; gap: 8px; text-align: left;">
+                    <!-- 3D VRM Card -->
+                    <div style="background: rgba(14, 165, 233, 0.1); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 10px; padding: 8px 10px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px;">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span style="font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 4px; background: rgba(56, 189, 248, 0.25); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4);">3D</span>
+                                <span style="font-size: 11px; font-weight: 600; color: #f1f5f9;">VRMモデル（お手持ちのモデル）</span>
+                            </div>
+                        </div>
+                        <p style="font-size: 10px; color: #94a3b8; margin: 0; line-height: 1.4;">
+                            お好みの <span style="color: #e2e8f0; font-weight: 500;">.vrm</span> ファイル（60MB以内）をドロップするだけで即座に反映されます。
+                        </p>
                     </div>
-                    <span style="display: flex; align-items: center; gap: 3px; font-size: 11px; color: #c084fc;">
-                        <span>配布ページ</span>
-                        <svg style="width: 12px; height: 12px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-                    </span>
-                </a>
 
-                <a href="https://vtem.jp/listing/ulvm2_0001/" target="_blank" rel="noopener noreferrer" class="deining-model-dl-btn" style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: rgba(30, 27, 75, 0.5); border: 1px solid ${!isBrown ? 'rgba(168, 85, 247, 0.6)' : 'rgba(255, 255, 255, 0.12)'}; border-radius: 10px; color: #e2e8f0; text-decoration: none; font-size: 12px; transition: all 0.2s ease; cursor: pointer;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #cbd5e1; box-shadow: 0 0 6px rgba(203, 213, 225, 0.8);"></span>
-                        <span style="font-weight: 600;">銀髪の女の子</span>
-                        ${!isBrown ? '<span style="font-size: 9px; padding: 1px 6px; border-radius: 9999px; background: rgba(168, 85, 247, 0.35); color: #f3e8ff; border: 1px solid rgba(168, 85, 247, 0.5);">選択中</span>' : ''}
+                    <!-- 2D Live2D Card -->
+                    <div style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 10px; padding: 8px 10px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span style="font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 4px; background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4);">2D</span>
+                                <span style="font-size: 11px; font-weight: 600; color: #f1f5f9;">公式推奨Live2Dモデル</span>
+                            </div>
+                            <span style="font-size: 10px; color: #94a3b8;">無料 / vtem.jp</span>
+                        </div>
+                        <p style="font-size: 10px; color: #94a3b8; margin: 0 0 6px 0; line-height: 1.3;">
+                            配布先からダウンロードしたZIPを解凍せずドロップしてください。
+                        </p>
+                        <div style="display: flex; flex-direction: column; gap: 5px;">
+                            <a href="https://vtem.jp/listing/model_0005_favorite/" target="_blank" rel="noopener noreferrer" class="deining-model-dl-btn" style="display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: rgba(30, 27, 75, 0.6); border: 1px solid ${isBrown ? 'rgba(168, 85, 247, 0.6)' : 'rgba(255, 255, 255, 0.12)'}; border-radius: 8px; color: #e2e8f0; text-decoration: none; font-size: 11px; transition: all 0.2s ease; cursor: pointer;">
+                                <div style="display: flex; align-items: center; gap: 6px;">
+                                    <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #d97706; box-shadow: 0 0 4px rgba(217, 119, 6, 0.8);"></span>
+                                    <span style="font-weight: 600;">茶髪の癒し系お姉さん</span>
+                                    ${isBrown ? '<span style="font-size: 8px; padding: 1px 5px; border-radius: 9999px; background: rgba(168, 85, 247, 0.35); color: #f3e8ff; border: 1px solid rgba(168, 85, 247, 0.5);">選択中</span>' : ''}
+                                </div>
+                                <span style="display: flex; align-items: center; gap: 3px; font-size: 10px; color: #c084fc;">
+                                    <span>配布先</span>
+                                    <svg style="width: 11px; height: 11px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                                </span>
+                            </a>
+
+                            <a href="https://vtem.jp/listing/ulvm2_0001/" target="_blank" rel="noopener noreferrer" class="deining-model-dl-btn" style="display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: rgba(30, 27, 75, 0.6); border: 1px solid ${!isBrown ? 'rgba(168, 85, 247, 0.6)' : 'rgba(255, 255, 255, 0.12)'}; border-radius: 8px; color: #e2e8f0; text-decoration: none; font-size: 11px; transition: all 0.2s ease; cursor: pointer;">
+                                <div style="display: flex; align-items: center; gap: 6px;">
+                                    <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #cbd5e1; box-shadow: 0 0 4px rgba(203, 213, 225, 0.8);"></span>
+                                    <span style="font-weight: 600;">銀髪の女の子</span>
+                                    ${!isBrown ? '<span style="font-size: 8px; padding: 1px 5px; border-radius: 9999px; background: rgba(168, 85, 247, 0.35); color: #f3e8ff; border: 1px solid rgba(168, 85, 247, 0.5);">選択中</span>' : ''}
+                                </div>
+                                <span style="display: flex; align-items: center; gap: 3px; font-size: 10px; color: #c084fc;">
+                                    <span>配布先</span>
+                                    <svg style="width: 11px; height: 11px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                                </span>
+                            </a>
+                        </div>
                     </div>
-                    <span style="display: flex; align-items: center; gap: 3px; font-size: 11px; color: #c084fc;">
-                        <span>配布ページ</span>
-                        <svg style="width: 12px; height: 12px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-                    </span>
-                </a>
+                </div>
+
+                <input type="file" id="deining-live2d-file-input" accept=".vrm,.zip" style="display: none;" />
             </div>
-            
-            <input type="file" id="deining-live2d-file-input" accept=".zip" style="display: none;" />
         `;
     };
 
@@ -1244,6 +1266,7 @@ function showLive2DGuidance() {
             transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
             user-select: none;
+            overflow-y: auto;
         `;
         guideEl.innerHTML = renderGuidanceHtml();
 
