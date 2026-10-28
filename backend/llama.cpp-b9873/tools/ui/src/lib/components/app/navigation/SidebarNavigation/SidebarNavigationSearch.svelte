@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { SearchInput } from '$lib/components/app';
+	import { t } from '$lib/stores/i18n.svelte';
 
 	interface Props {
 		value?: string;
@@ -10,7 +11,7 @@
 
 	let {
 		value = $bindable(''),
-		placeholder = 'Search conversations...',
+		placeholder = t('sidebar.searchPlaceholder', '会話を検索...'),
 		onInput,
 		class: className
 	}: Props = $props();

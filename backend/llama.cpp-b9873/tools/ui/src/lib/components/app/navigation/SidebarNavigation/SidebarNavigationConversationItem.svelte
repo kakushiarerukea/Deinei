@@ -17,6 +17,7 @@
 	import { getAllLoadingChats } from '$lib/stores/chat.svelte';
 	import { conversationsStore } from '$lib/stores/conversations.svelte';
 	import { TruncatedText } from '$lib/components/app';
+	import { t } from '$lib/stores/i18n.svelte';
 	import { onMount } from 'svelte';
 
 	interface Props {
@@ -138,7 +139,7 @@
 				</Tooltip.Trigger>
 
 				<Tooltip.Content>
-					<p>See parent conversation</p>
+					<p>{t('sidebar.parentConversation', '親の会話を見る')}</p>
 				</Tooltip.Content>
 			</Tooltip.Root>
 		{/if}
@@ -152,7 +153,7 @@
 						onkeydown={(e) => e.key === 'Enter' && handleStop(e)}
 						role="button"
 						tabindex="0"
-						aria-label="Stop generation"
+						aria-label={t('sidebar.stopGeneration', '生成を停止')}
 					>
 						<Loader2 class="loading-icon h-3.5 w-3.5 animate-spin" />
 
@@ -161,7 +162,7 @@
 				</Tooltip.Trigger>
 
 				<Tooltip.Content>
-					<p>Stop generation</p>
+					<p>{t('sidebar.stopGeneration', '生成を停止')}</p>
 				</Tooltip.Content>
 			</Tooltip.Root>
 		{/if}
@@ -173,12 +174,12 @@
 		<div class="actions flex items-center">
 			<DropdownMenuActions
 				triggerIcon={MoreHorizontal}
-				triggerTooltip="More actions"
+				triggerTooltip={t('sidebar.moreActions', '操作メニュー')}
 				bind:open={dropdownOpen}
 				actions={[
 					{
 						icon: conversation.pinned ? PinOff : Pin,
-						label: conversation.pinned ? 'Unpin' : 'Pin',
+						label: conversation.pinned ? t('sidebar.unpin', 'ピン留めを解除') : t('sidebar.pin', 'ピン留めする'),
 						onclick: (e: Event) => {
 							e.stopPropagation();
 							handleTogglePin();
@@ -186,13 +187,13 @@
 					},
 					{
 						icon: Pencil,
-						label: 'Edit',
+						label: t('sidebar.edit', '名前を変更'),
 						onclick: handleEdit,
 						shortcut: ['shift', 'cmd', 'e']
 					},
 					{
 						icon: Download,
-						label: 'Export',
+						label: t('sidebar.export', 'エクスポート'),
 						onclick: (e: Event) => {
 							e.stopPropagation();
 							conversationsStore.downloadConversation(conversation.id);
@@ -201,7 +202,7 @@
 					},
 					{
 						icon: Trash2,
-						label: 'Delete',
+						label: t('sidebar.delete', '削除'),
 						onclick: handleDelete,
 						variant: 'destructive',
 						shortcut: ['shift', 'cmd', 'd'],

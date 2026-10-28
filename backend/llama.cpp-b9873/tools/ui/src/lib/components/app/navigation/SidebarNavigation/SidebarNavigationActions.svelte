@@ -11,6 +11,7 @@
 		SIDEBAR_ACTIONS_ITEMS
 	} from '$lib/constants';
 	import { isMobile } from '$lib/stores/viewport.svelte';
+	import { t } from '$lib/stores/i18n.svelte';
 	import { TooltipSide } from '$lib/enums';
 	import { fade } from 'svelte/transition';
 	import { circIn } from 'svelte/easing';
@@ -97,7 +98,7 @@
 			bind:ref={searchInputRef}
 			onClose={handleSearchModeDeactivate}
 			onKeyDown={(e) => e.key === 'Escape' && handleSearchModeDeactivate()}
-			placeholder="Search conversations..."
+			placeholder={t('sidebar.searchPlaceholder', '会話を検索...')}
 		/>
 	</div>
 {:else if isExpandedMode || isOnMobile}
@@ -148,7 +149,7 @@
 								<span
 									in:fade={{ duration: 150, easing: circIn, delay: 50 }}
 									out:fade={{ duration: 100 }}
-									class="min-w-0 truncate">{item.tooltip}</span
+									class="min-w-0 truncate">{t(item.tooltipKey || item.tooltip, item.tooltip)}</span
 								>
 							{/if}
 						</span>
@@ -190,7 +191,7 @@
 				<div transition:fade={itemTransition}>
 					<ActionIcon
 						icon={item.icon}
-						tooltip={item.tooltip}
+						tooltip={t(item.tooltipKey || item.tooltip, item.tooltip)}
 						tooltipSide={TooltipSide.RIGHT}
 						size="lg"
 						iconSize="h-4 w-4"

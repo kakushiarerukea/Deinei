@@ -24,6 +24,7 @@
 	import { TooltipSide } from '$lib/enums';
 	import { device } from '$lib/stores/device.svelte';
 	import { circIn } from 'svelte/easing';
+	import { t } from '$lib/stores/i18n.svelte';
 
 	interface Props {
 		onSearchClick?: () => void;
@@ -145,7 +146,7 @@
 		const conversation = conversations().find((conv) => conv.id === id);
 		if (!conversation) return;
 
-		const newName = window.prompt('Rename conversation', conversation.name);
+		const newName = window.prompt(t('sidebar.renamePrompt', '会話の新しい名前を入力してください'), conversation.name);
 		if (newName && newName.trim()) {
 			await conversationsStore.updateConversationName(id, newName.trim());
 		}
@@ -156,7 +157,7 @@
 		if (!conversation) return;
 
 		const confirmed = window.confirm(
-			`Delete "${conversation.name}"? This action cannot be undone.`
+			t('sidebar.deleteConfirm', { name: conversation.name }, `「${conversation.name}」を削除しますか？この操作は取り消せません。`)
 		);
 		if (!confirmed) return;
 
@@ -241,7 +242,7 @@
 						: 'bg-transparent!'} md:h-9 md:w-9 h-10 w-10 rounded-full md:hover:bg-foreground/10! pointer-events-auto"
 					href={isExpandedMode ? ROUTES.START : undefined}
 					onclick={isExpandedMode ? undefined : toggleExpandedMode}
-					tooltip={isExpandedMode ? undefined : 'Open Sidebar'}
+					tooltip={isExpandedMode ? undefined : t('sidebar.openSidebar', 'サイドバーを開く')}
 					tooltipSide={TooltipSide.RIGHT}
 					ariaLabel={isExpandedMode ? 'Go to start' : 'Expand navigation'}
 				/>
@@ -259,7 +260,7 @@
 						iconSize="h-4.5 w-4.5 md:h-4 md:w-4"
 						class="backdrop-blur-none md:h-9 md:w-9 h-10 w-10 rounded-full mr-1 hover:bg-accent! pointer-events-auto"
 						onclick={toggleExpandedMode}
-						tooltip={isExpandedMode ? 'Close Sidebar' : 'Open Menu'}
+						tooltip={isExpandedMode ? t('sidebar.closeSidebar', 'サイドバーを閉じる') : t('sidebar.openMenu', 'メニューを開く')}
 						tooltipSide={TooltipSide.LEFT}
 						ariaLabel={isExpandedMode ? 'Collapse navigation' : 'Open navigation menu'}
 					/>

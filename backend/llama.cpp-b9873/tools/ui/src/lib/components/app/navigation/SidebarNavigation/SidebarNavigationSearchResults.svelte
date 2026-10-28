@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { buildConversationTree } from '$lib/stores/conversations.svelte';
 	import SidebarNavigationConversationItem from './SidebarNavigationConversationItem.svelte';
+	import { t } from '$lib/stores/i18n.svelte';
 
 	interface Props {
 		class?: string;
@@ -29,7 +30,7 @@
 	const hasQuery = $derived(searchQuery.trim().length > 0);
 	const showHeader = $derived(hasQuery && filteredConversations.length > 0);
 
-	const emptyMessage = $derived(hasQuery ? 'No results found' : 'Start typing to see results');
+	const emptyMessage = $derived(hasQuery ? t('sidebar.noResults', '該当する会話が見つかりません') : t('sidebar.startTyping', 'キーワードを入力して検索'));
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col gap-2 whitespace-nowrap {className}">
@@ -37,7 +38,7 @@
 		<div
 			class="text-muted-foreground flex h-8 shrink-0 items-center rounded-md px-2 text-xs font-medium"
 		>
-			Search results
+			{t('sidebar.searchResults', '検索結果')}
 		</div>
 	{/if}
 

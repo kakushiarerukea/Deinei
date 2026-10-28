@@ -3,6 +3,7 @@
 	import { buildConversationTree } from '$lib/stores/conversations.svelte';
 	import SidebarNavigationConversationItem from './SidebarNavigationConversationItem.svelte';
 	import SidebarNavigationSearchResults from './SidebarNavigationSearchResults.svelte';
+	import { t } from '$lib/stores/i18n.svelte';
 
 	interface Props {
 		class: string;
@@ -39,7 +40,7 @@
 	);
 
 	const recentEmptyMessage = $derived(
-		searchQuery.length > 0 ? 'No results found' : 'No conversations yet'
+		searchQuery.length > 0 ? t('sidebar.noResults', '該当する会話が見つかりません') : t('sidebar.noConversations', '会話履歴がありません')
 	);
 </script>
 
@@ -62,7 +63,7 @@
 			>
 				<Pin class="h-3.5 w-3.5" />
 
-				<span>Pinned</span>
+				<span>{t('sidebar.pinned', 'ピン留め')}</span>
 			</div>
 		</div>
 
@@ -95,7 +96,7 @@
 			<div
 				class="text-muted-foreground flex h-8 shrink-0 items-center rounded-md px-2 text-xs font-medium"
 			>
-				Recent conversations
+				{t('sidebar.recentConversations', '最近の会話')}
 			</div>
 		{/if}
 
