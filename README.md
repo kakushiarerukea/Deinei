@@ -1,5 +1,9 @@
 # Deinei / 泥濘
 
+<p align="center">
+  <b>日本語</b> | <a href="README.en.md">English</a>
+</p>
+
 <div align="center">
 
   <img src="docs/assets/banner.png" alt="Deinei - Where memory becomes life." width="800">
