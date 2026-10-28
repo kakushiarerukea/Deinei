@@ -433,6 +433,9 @@
 				{ duration: 8000 }
 			);
 		}
+		if (isVrmUrl(value)) {
+			deiningAvatar.hideGuidance();
+		}
 		deiningAvatar.changeModel(value);
 	}
 

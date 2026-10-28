@@ -28,6 +28,7 @@ export interface AvatarFacade {
 	addHitbox: (name: string, exp: string) => void;
 	changeCostume: () => void;
 	isVrmActive: () => boolean;
+	hideGuidance: () => void;
 	deiningUploadModelZip: (file: File) => Promise<any>;
 	deiningUploadVrm: (file: File) => Promise<any>;
 }
@@ -43,6 +44,14 @@ export function isLocalAccess(): boolean {
 function getAvatarPref(): string {
 	if (typeof window === 'undefined') return '';
 	return localStorage.getItem('sys_avatar_pref') || '';
+}
+
+export function hideLive2DGuidance(): void {
+	if (typeof document === 'undefined') return;
+	const guideEl = document.getElementById('deining-live2d-guidance');
+	if (guideEl) guideEl.style.display = 'none';
+	const core = (window as any)?.deiningAvatarCore;
+	if (core?.hideGuidance) core.hideGuidance();
 }
 
 export function isVrmUrl(url: string): boolean {
@@ -62,6 +71,7 @@ export async function mountAvatar(): Promise<void> {
 
 	if (isVrmUrl(pref)) {
 		isVrm = true;
+		hideLive2DGuidance();
 		if (live2dCanvas) live2dCanvas.style.display = 'none';
 		if (vrmCanvas) {
 			vrmCanvas.style.display = 'block';
@@ -104,6 +114,7 @@ export async function changeModel(url: string): Promise<void> {
 		// Live2D -> VRM
 		isVrm = true;
 		localStorage.setItem('sys_avatar_pref', url);
+		hideLive2DGuidance();
 
 		// Live2D 描画ループを停止
 		if (core?.setLive2dActive) core.setLive2dActive(false);
@@ -241,6 +252,7 @@ export const deiningAvatar: AvatarFacade = {
 	addHitbox,
 	changeCostume,
 	isVrmActive,
+	hideGuidance: hideLive2DGuidance,
 	deiningUploadModelZip: (file: File) => {
 		const core = (window as any).deiningAvatarCore;
 		if (core?.deiningUploadModelZip) return core.deiningUploadModelZip(file);

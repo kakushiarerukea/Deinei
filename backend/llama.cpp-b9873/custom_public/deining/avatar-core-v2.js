@@ -1147,6 +1147,13 @@ function showLive2DGuidance() {
     const avatarContainer = document.getElementById('avatar-container') || document.body;
     let guideEl = document.getElementById('deining-live2d-guidance');
 
+    // 現在VRMモデルが選択されている場合はLive2Dガイダンス表示を抑止
+    const currentPref = localStorage.getItem('sys_avatar_pref') || '';
+    if (currentPref.includes('/vrm/') || currentPref.toLowerCase().endsWith('.vrm')) {
+        if (guideEl) guideEl.style.display = 'none';
+        return;
+    }
+
     // LAN / リモートアクセス環境ではLive2D利用規約の制限によりガイダンス表示を抑止
     const h = (window.location.hostname || '').toLowerCase();
     const isLocal = h === '127.0.0.1' || h === 'localhost' || h === '::1';
@@ -1171,7 +1178,9 @@ function showLive2DGuidance() {
 
     const renderGuidanceHtml = () => {
         const cachedAvatarData = localStorage.getItem('sys_avatar_pref') || '';
-        const isBrown = cachedAvatarData.includes('fav_usaneko') || cachedAvatarData.includes('茶髪の癒し系お姉さん');
+        const isVrmPref = cachedAvatarData.includes('/vrm/') || cachedAvatarData.toLowerCase().endsWith('.vrm');
+        const isBrown = !isVrmPref && (cachedAvatarData.includes('fav_usaneko') || cachedAvatarData.includes('茶髪の癒し系お姉さん'));
+        const isSilver = !isVrmPref && (cachedAvatarData.includes('ulvm2') || cachedAvatarData.includes('銀髪の女の子') || !isBrown);
 
         return `
             <div style="width: 100%; max-width: 320px; display: flex; flex-direction: column; align-items: center;">
@@ -1223,11 +1232,11 @@ function showLive2DGuidance() {
                                 </span>
                             </a>
 
-                            <a href="https://vtem.jp/listing/ulvm2_0001/" target="_blank" rel="noopener noreferrer" class="deining-model-dl-btn" style="display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: rgba(30, 27, 75, 0.6); border: 1px solid ${!isBrown ? 'rgba(168, 85, 247, 0.6)' : 'rgba(255, 255, 255, 0.12)'}; border-radius: 8px; color: #e2e8f0; text-decoration: none; font-size: 11px; transition: all 0.2s ease; cursor: pointer;">
+                            <a href="https://vtem.jp/listing/ulvm2_0001/" target="_blank" rel="noopener noreferrer" class="deining-model-dl-btn" style="display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: rgba(30, 27, 75, 0.6); border: 1px solid ${isSilver ? 'rgba(168, 85, 247, 0.6)' : 'rgba(255, 255, 255, 0.12)'}; border-radius: 8px; color: #e2e8f0; text-decoration: none; font-size: 11px; transition: all 0.2s ease; cursor: pointer;">
                                 <div style="display: flex; align-items: center; gap: 6px;">
                                     <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #cbd5e1; box-shadow: 0 0 4px rgba(203, 213, 225, 0.8);"></span>
                                     <span style="font-weight: 600;">銀髪の女の子</span>
-                                    ${!isBrown ? '<span style="font-size: 8px; padding: 1px 5px; border-radius: 9999px; background: rgba(168, 85, 247, 0.35); color: #f3e8ff; border: 1px solid rgba(168, 85, 247, 0.5);">選択中</span>' : ''}
+                                    ${isSilver ? '<span style="font-size: 8px; padding: 1px 5px; border-radius: 9999px; background: rgba(168, 85, 247, 0.35); color: #f3e8ff; border: 1px solid rgba(168, 85, 247, 0.5);">選択中</span>' : ''}
                                 </div>
                                 <span style="display: flex; align-items: center; gap: 3px; font-size: 10px; color: #c084fc;">
                                     <span>配布先</span>
@@ -1400,6 +1409,10 @@ async function mountAvatarSystem() {
             localStorage.setItem('sys_avatar_pref', cachedAvatarData);
         }
         window.deiningAvatarCore.setLive2dActive = (active) => {
+            if (!active) {
+                const guideEl = document.getElementById('deining-live2d-guidance');
+                if (guideEl) guideEl.style.display = 'none';
+            }
             if (app && app.ticker) {
                 if (active) {
                     if (!app.ticker.started) app.ticker.start();
@@ -1407,6 +1420,11 @@ async function mountAvatarSystem() {
                     if (app.ticker.started) app.ticker.stop();
                 }
             }
+        };
+
+        window.deiningAvatarCore.hideGuidance = () => {
+            const guideEl = document.getElementById('deining-live2d-guidance');
+            if (guideEl) guideEl.style.display = 'none';
         };
 
         function clearAllLive2DModels() {
