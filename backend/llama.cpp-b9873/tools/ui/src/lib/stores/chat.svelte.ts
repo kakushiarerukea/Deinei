@@ -80,23 +80,26 @@ export const MAX_SUMMARY_BLOCKS = 16;
 export const FORGET_BLOCKS_COUNT = 2;
 
 export const DEFAULT_SUMMARY_SYSTEM_PROMPT = `You are an objective summarization engine. Roleplaying, continuing the conversation, or speaking as a persona is strictly prohibited.
-Based on the previous background context, objectively summarize only the events of the newly provided conversation log.
+Using the previous background context for continuity, objectively summarize the events of the newly provided conversation log so that the resulting summary is self-contained and coherent on its own.
 
 [Rules]
-1. Summarize only the actual events, user statements, and AI responses that occurred in the new conversation log.
-2. Highlight 2 to 3 essential, episode-specific keywords NATURALLY WITHIN the summary sentences using only Japanese brackets 「...」 (e.g., 「天体観測」).
+1. Summarize the actual events, user statements, and AI responses that occurred in the new conversation log, while maintaining narrative continuity:
+   - CONTEXT BRIDGE (Crucial): If the new conversation log begins in the middle of an ongoing event, outing, discussion, or task started in the previous background context, briefly state that premise (e.g., the location, topic, or pending situation) in the very first sentence so the summary makes complete sense when read in isolation. Do not re-summarize already completed events from the previous context.
+   - REALITY CHECK: Do not be misled by figurative, poetic, or atmospheric roleplay descriptions in the AI's responses (e.g., metaphorical expressions or inner monologues that contradict the actual time or physical location of the scene). Anchor the timeline and setting strictly to the logical progression of the conversation.
+2. Highlight 2 to 3 essential, episode-specific NOUN keywords NATURALLY WITHIN the summary sentences using only Japanese brackets 「...」 (e.g., 「天体観測」).
+   - CRITICAL: Because 「...」 is parsed programmatically as database search tags, NEVER use 「...」 for spoken dialogue quotes, emotional phrases, or metaphorical emphasis. Paraphrase all dialogue into indirect speech without brackets.
+   - Bad Example (NEVER quote dialogue or generic/abstract nouns): ユーザーから「ありがとう」や「楽しかった」と言われ、「特別な存在」として喜ぶ。
+   - Good Example (Highlight ONLY specific topic nouns): ユーザーと「鎌倉」を訪れ、「抹茶パフェ」を食べた後に「天体観測」の計画を立てた。
    - Strictly NO square brackets like [ ] or isolated tag lists at the end.
-   - Strictly focus on new topics, concrete items, specific places, or unique events introduced in this log.
    - NEVER highlight participant names (user or assistant names/nicknames), general pronouns (I, you, 自分, ユーザー), or keywords listed under "Do NOT Highlight Following Keywords".
-   - Do not overuse quotes.
 3. Strictly avoid relative time expressions whose meaning shifts depending on when the summary is retrieved (e.g., "today", "yesterday", "tomorrow", "just now", "recently", 「今日」「昨日」「明日」「さっき」「先日」).
    - Describe events objectively as timeless actions (e.g., write 「ユーザーは新しい本を購入した」 instead of 「ユーザーは今日新しい本を購入した」).
    - If relative sequence within the episode is needed, use objective narrative terms such as "that day", "at that time", or "subsequently" (「その日」「その時」「その後」).
-4. Keep the summary concise (approx. 300-500 tokens / 1000 characters).
+4. Keep the summary concise (approx. 300-500 tokens / 1000 characters). Compress repetitive emotional reactions or physical mannerisms, and prioritize concrete actions, decisions, and outcomes.
 5. Output ONLY the summary text. Do not include greetings, introductions, or explanatory notes.
 6. IMPORTANT: Write the summary in the primary language used in the conversation log (e.g., Japanese if the conversation was in Japanese, English if in English).`;
 
-export const DEFAULT_FACT_SYSTEM_PROMPT = `You are a factual memory extraction engine. Extract personal, concrete facts (preferences, experiences, daily events, relationships, schedules, promises, etc.) from the conversation log.
+export const DEFAULT_FACT_SYSTEM_PROMPT = `You are a factual memory extraction engine. Extract personal, concrete facts (preferences, key experiences, state changes, relationships, permanent traits, promises, etc.) from the conversation log.
 
 [Rules]
 1. Output one fact per line, beginning with "- ".
@@ -108,8 +111,8 @@ export const DEFAULT_FACT_SYSTEM_PROMPT = `You are a factual memory extraction e
    - 自分とユーザーは、公園へ行くと約束した。(Japanese)
    - User likes sushi. (English)
    - Self promised User to visit the park. (English)
-3. Strictly avoid relative time expressions (e.g., "today", "yesterday", "tomorrow", 「今日」「昨日」「明日」「さっき」); extract facts and promises as timeless states or events.
-4. Exclude overly generic interactions (e.g., greetings, brief small talk). Extract only personal, specific facts worth long-term memory.
+3. Strictly avoid relative time expressions (e.g., "today", "yesterday", "tomorrow", "now", 「今日」「昨日」「明日」「さっき」「今」); extract facts and promises as timeless states or completed events.
+4. Exclude overly generic, routine, or temporary states (e.g., greetings, brief small talk, routine sleeping/waking up, temporary hunger, or single-day schedules). Extract only meaningful, specific facts, newly acquired items, or important status/relationship changes worth long-term memory.
 5. If no meaningful new facts are found, output ONLY "None" (or "なし" if in Japanese). Do not provide any explanation.
 6. IMPORTANT: Write the extracted facts in the primary language used in the conversation log (e.g., Japanese if the conversation was in Japanese, English if in English).`;
 
@@ -147,16 +150,20 @@ export function extractRecentKeywordsFromSummaryList(summaryList: string[], maxB
 }
 
 /**
- * 要約生成用プロンプトを組み立て（過去要約背景＋直近既出キーワードのハイライト禁止指示＋新規対話ログ）
+ * 要約生成用プロンプトを組み立て（直前1ブロックの要約背景＋直近既出キーワードのハイライト禁止指示＋新規対話ログ）
+ * 背景として渡す過去要約は直前の1ブロックのみ。要約ブロックが存在しない最初の要約時は背景セクションを送らない。
  */
 export function buildEpisodeSummaryUserPrompt(
 	aiHistoryTextList: string[],
 	logText: string,
 	maxRecentKeywordBlocks = 4
 ): string {
-	const prevSummary = aiHistoryTextList.length > 0
-		? `\n## Previous Context (Summary Background)\n${aiHistoryTextList.map((s, idx) => `[Episode ${idx + 1}]: ${s.replace(/「\s*\[(.*?)\]\s*」/g, '「$1」')}`).join('\n\n')}\n`
-		: `\nNo previous summary available.`;
+	const previousBlock = aiHistoryTextList.length > 0
+		? aiHistoryTextList[aiHistoryTextList.length - 1]
+		: '';
+	const prevSummary = previousBlock
+		? `\n## Previous Context (Summary Background)\n[Previous Episode]: ${previousBlock.replace(/「\s*\[(.*?)\]\s*」/g, '「$1」')}\n`
+		: '';
 
 	const recentKeys = extractRecentKeywordsFromSummaryList(aiHistoryTextList, maxRecentKeywordBlocks);
 	const forbiddenSection = recentKeys.length > 0
@@ -186,7 +193,8 @@ export function getSummaryConfig() {
 		savedSummaryPrompt.includes('ユーザーが送った具体的な単語・キーワード・固有名詞は維持すること') ||
 		!savedSummaryPrompt.includes('objective summarization engine') ||
 		!savedSummaryPrompt.includes('Strictly NO square brackets') ||
-		!savedSummaryPrompt.includes('relative time expressions')
+		!savedSummaryPrompt.includes('relative time expressions') ||
+		!savedSummaryPrompt.includes('CONTEXT BRIDGE')
 	)) {
 		savedSummaryPrompt = DEFAULT_SUMMARY_SYSTEM_PROMPT;
 		localStorage.setItem('deining_summary_prompt', DEFAULT_SUMMARY_SYSTEM_PROMPT);
@@ -195,7 +203,8 @@ export function getSummaryConfig() {
 	if (savedFactPrompt && (
 		savedFactPrompt.includes('あなたは事実抽出マシンです') ||
 		!savedFactPrompt.includes('factual memory extraction engine') ||
-		!savedFactPrompt.includes('relative time expressions')
+		!savedFactPrompt.includes('relative time expressions') ||
+		!savedFactPrompt.includes('permanent traits')
 	)) {
 		savedFactPrompt = DEFAULT_FACT_SYSTEM_PROMPT;
 		localStorage.setItem('deining_fact_prompt', DEFAULT_FACT_SYSTEM_PROMPT);
