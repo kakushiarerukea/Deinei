@@ -206,6 +206,13 @@
 	);
 	let modelLoadingText = $derived(modelLoadProgressText(modelLoadProgress));
 
+	let activeProcessingStatusText = $derived(
+		modelLoadingText ??
+			processingState.getPromptProgressText() ??
+			processingState.getProcessingMessage() ??
+			''
+	);
+
 	let showProcessingInfoTop = $derived(
 		message?.role === MessageRole.ASSISTANT &&
 			isActivelyProcessing &&
@@ -218,7 +225,8 @@
 		message?.role === MessageRole.ASSISTANT &&
 			isActivelyProcessing &&
 			(!hasNoContent || isAgentic) &&
-			isLastAssistantMessage
+			isLastAssistantMessage &&
+			Boolean(activeProcessingStatusText)
 	);
 
 	let assistantEl: HTMLDivElement | undefined = $state();
@@ -404,6 +412,8 @@
 
 	let segments = $derived.by(() => {
 		if (!isLastAssistantMessage && !isAudioSequenceActive) return [];
+		// 音声同期順次表示 (Sync Display) が無効な場合は、ストリーミング中の毎チャンク12連発正規表現スキャンをスキップし、生成完了時に1回だけ分割する
+		if (isStreaming && !isSyncDisplayConfigured && !isAudioSequenceActive) return [];
 		const raw = message.content || '';
 		return splitIntoSmartSegments(raw);
 	});

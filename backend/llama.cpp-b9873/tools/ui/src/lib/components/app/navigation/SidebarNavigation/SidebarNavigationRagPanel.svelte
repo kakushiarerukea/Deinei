@@ -44,14 +44,20 @@
 		try {
 			isLoading = true;
 			const convId = conversationsStore.activeConversation?.id;
-			const activeMsgIds = conversationsStore.activeMessages.map((m) => m.id).join(',');
-			const url = convId
-				? `${getGatewayBaseUrl()}/memory/list?session_id=${convId}&active_message_ids=${encodeURIComponent(activeMsgIds)}`
-				: `${getGatewayBaseUrl()}/memory/list`;
+			const savedFilter = typeof localStorage !== 'undefined' ? localStorage.getItem('deining_worldline_filter_enabled') : null;
+			const isWorldlineFilterEnabled = savedFilter !== null ? savedFilter === 'true' : true;
+			const activeMsgIds = isWorldlineFilterEnabled ? conversationsStore.activeMessages.map((m) => m.id).join(',') : '';
+			let url = `${getGatewayBaseUrl()}/memory/list`;
+			if (convId) {
+				url += `?session_id=${convId}&worldline_filter_enabled=${isWorldlineFilterEnabled}`;
+				if (activeMsgIds) {
+					url += `&active_message_ids=${encodeURIComponent(activeMsgIds)}`;
+				}
+			}
 			const res = await fetch(url);
 			if (res.ok) {
 				const data = await res.json();
-				console.log('[RagPanel] Fetched memories count for active branch:', data.memories?.length);
+				console.log(`[RagPanel] Fetched memories count (filter=${isWorldlineFilterEnabled}):`, data.memories?.length);
 				memories = [...(data.memories || [])];
 			}
 		} catch (e) {

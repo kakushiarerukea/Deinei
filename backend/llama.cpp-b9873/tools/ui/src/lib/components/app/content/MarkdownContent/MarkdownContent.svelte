@@ -146,7 +146,7 @@
 
 	const themeStyleId = `highlight-theme-${(window.idxThemeStyle = (window.idxThemeStyle ?? 0) + 1)}`;
 
-	let processor = $derived(() => {
+	const processorMemo = $derived.by(() => {
 		void attachments;
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		let proc: any = remark().use(remarkGfm); // GitHub Flavored Markdown
@@ -194,6 +194,7 @@
 			.use(rehypeRtlSupport) // Add bidirectional text support
 			.use(rehypeStringify, { allowDangerousHtml: true }); // Convert to HTML string
 	});
+	const processor = () => processorMemo;
 
 	/**
 	 * Removes click event listeners from copy and preview buttons.
@@ -839,15 +840,29 @@
 		updateRenderedBlocks(preprocessAsterisks(currentContent, loading, streaming));
 	});
 
+	let lastProcessedBlockCount = 0;
+
 	$effect(() => {
-		const hasRenderedBlocks = renderedBlocks.length > 0;
-		const hasUnstableBlock = Boolean(unstableBlockHtml);
+		const blockCount = renderedBlocks.length;
+		const unstable = unstableBlockHtml;
+		const hasRenderedBlocks = blockCount > 0;
+		const hasUnstableBlock = Boolean(unstable);
 
 		if ((hasRenderedBlocks || hasUnstableBlock) && containerRef) {
-			setupCodeBlockActions();
-			setupImageErrorHandlers();
-			renderMermaidDiagrams();
-			renderSvgDiagrams();
+			const blocksChanged = blockCount !== lastProcessedBlockCount;
+			lastProcessedBlockCount = blockCount;
+			const unstableNeedsSetup =
+				unstable.includes('code-block-wrapper') ||
+				unstable.includes('<img') ||
+				unstable.includes('mermaid') ||
+				unstable.includes('svg-block');
+
+			if (blocksChanged || unstableNeedsSetup) {
+				setupCodeBlockActions();
+				setupImageErrorHandlers();
+				renderMermaidDiagrams();
+				renderSvgDiagrams();
+			}
 		}
 	});
 

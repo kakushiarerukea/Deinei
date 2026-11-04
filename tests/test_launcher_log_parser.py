@@ -6,7 +6,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from launcher_log_parser import (
     clean_status_label,
+    get_total_system_ram_gb,
     is_noise_log_line,
+    is_step1_kv_preset,
     parse_flask_log_line,
     parse_gateway_log_line,
     parse_llm_log_line,
@@ -362,6 +364,88 @@ class TestLauncherLogParser(unittest.TestCase):
 
             deinei_launcher.stop_popen_process(running_proc)
             mock_kill.assert_called_once_with(88888)
+
+    def test_step1_kv_preset_selection_and_llm_args(self):
+        from unittest.mock import patch
+        from deinei_launcher import LauncherApiBridge, parse_args
+
+        self.assertTrue(is_step1_kv_preset({"PROFILE_NAME": "24GB (Ultra)"}))
+        self.assertTrue(is_step1_kv_preset({"PROFILE_NAME": "16GB (High)"}))
+        self.assertFalse(is_step1_kv_preset({"PROFILE_NAME": "12GB (Medium)"}))
+        self.assertFalse(is_step1_kv_preset({"PROFILE_NAME": "8GB (Low/Medium)"}))
+
+        args = parse_args(["--no-autostart", "--no-browser"])
+        bridge = LauncherApiBridge(args)
+        bridge.is_shutting_down = True
+        try:
+            with patch("os.path.isfile", return_value=True), patch.object(
+                bridge, "_spawn_process"
+            ) as mock_spawn:
+                # 16GB preset -> Step 1 enabled
+                bridge.profile = {"PROFILE_NAME": "16GB (High)", "NCMOE": 9, "MMPROJ_ARGS": ""}
+                bridge._start_llm_locked()
+                cmd_16 = mock_spawn.call_args[0][1]
+                self.assertIn("--slots", cmd_16)
+                self.assertIn("--slot-save-path", cmd_16)
+                self.assertNotIn("--swa-full", cmd_16)
+                idx_cr_16 = cmd_16.index("--cache-reuse")
+                self.assertEqual(cmd_16[idx_cr_16 + 1], "256")
+                self.assertNotIn("--no-slots", cmd_16)
+
+                # 24GB preset -> Step 1 enabled
+                mock_spawn.reset_mock()
+                bridge.profile = {"PROFILE_NAME": "24GB (Ultra)", "NCMOE": 0, "MMPROJ_ARGS": ""}
+                bridge._start_llm_locked()
+                cmd_24 = mock_spawn.call_args[0][1]
+                self.assertIn("--slots", cmd_24)
+                self.assertNotIn("--swa-full", cmd_24)
+
+                # 12GB preset -> Step 1 disabled
+                mock_spawn.reset_mock()
+                bridge.profile = {"PROFILE_NAME": "12GB (Medium)", "NCMOE": 16, "MMPROJ_ARGS": ""}
+                bridge._start_llm_locked()
+                cmd_12 = mock_spawn.call_args[0][1]
+                self.assertIn("--no-slots", cmd_12)
+                self.assertNotIn("--swa-full", cmd_12)
+                idx_cr_12 = cmd_12.index("--cache-reuse")
+                self.assertEqual(cmd_12[idx_cr_12 + 1], "256")
+        finally:
+            bridge.shutdown()
+
+
+    def test_total_ram_detection(self):
+        ram = get_total_system_ram_gb()
+        self.assertIsInstance(ram, float)
+        self.assertGreater(ram, 0.0)
+
+    def test_dynamic_mmap_args_based_on_ram(self):
+        from unittest.mock import patch
+        from deinei_launcher import LauncherApiBridge, parse_args
+
+        args = parse_args(["--no-autostart", "--no-browser"])
+        bridge = LauncherApiBridge(args)
+        bridge.is_shutting_down = True
+        try:
+            with patch("os.path.isfile", return_value=True), patch.object(
+                bridge, "_spawn_process"
+            ) as mock_spawn:
+                bridge.profile = {"PROFILE_NAME": "16GB (High)", "NCMOE": 9, "MMPROJ_ARGS": ""}
+
+                # 1. RAM >= 24GB (e.g. 32GB) -> --no-mmap included
+                with patch("deinei_launcher.get_total_system_ram_gb", return_value=32.0):
+                    bridge._start_llm_locked()
+                    cmd_32 = mock_spawn.call_args[0][1]
+                    self.assertIn("--no-mmap", cmd_32)
+                    env_32 = mock_spawn.call_args[1].get("cwd")  # checking call signature
+
+                # 2. RAM < 24GB (e.g. 15.9GB) -> --no-mmap excluded (mmap mode)
+                mock_spawn.reset_mock()
+                with patch("deinei_launcher.get_total_system_ram_gb", return_value=15.9):
+                    bridge._start_llm_locked()
+                    cmd_16 = mock_spawn.call_args[0][1]
+                    self.assertNotIn("--no-mmap", cmd_16)
+        finally:
+            bridge.shutdown()
 
 
 if __name__ == "__main__":

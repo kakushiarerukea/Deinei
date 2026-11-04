@@ -154,7 +154,7 @@ class TestUiStores(unittest.TestCase):
         """DEFAULT_SUMMARY_SYSTEM_PROMPT に当事者名・大カッコ使用禁止・既出キーワード禁止・相対時間表現禁止ルールが含まれることを確認。"""
         self.assertIn("NEVER highlight participant names", self.chat_src)
         self.assertIn("Do NOT Highlight Following Keywords", self.chat_src)
-        self.assertIn("episode-specific keywords", self.chat_src)
+        self.assertIn("episode-specific NOUN keywords", self.chat_src)
         self.assertIn("Strictly NO square brackets like [ ]", self.chat_src)
         self.assertIn("NATURALLY WITHIN the summary sentences", self.chat_src)
         self.assertIn("relative time expressions", self.chat_src)
@@ -280,6 +280,214 @@ class TestUiStores(unittest.TestCase):
         self.assertIn("Extended_Pictographic", avatar_core)
         self.assertIn("analyzeExpressionTimeline(emotionText)", avatar_core)
         self.assertIn(r"\U00010000-\U0010ffff", tts_server_src)
+
+
+    def test_10_ttfa_timing_field(self):
+        """TTFA(Time To First Audio)の計測およびJSONL用timingsフィールド定義を検証。"""
+        chat_d_ts_path = os.path.join(
+            REPO_ROOT,
+            "backend",
+            "llama.cpp-b9873",
+            "tools",
+            "ui",
+            "src",
+            "lib",
+            "types",
+            "chat.d.ts",
+        )
+        avatar_core_path = os.path.join(
+            REPO_ROOT,
+            "backend",
+            "llama.cpp-b9873",
+            "tools",
+            "ui",
+            "static",
+            "deining",
+            "avatar-core-v2.js",
+        )
+        with open(chat_d_ts_path, "r", encoding="utf-8") as f:
+            chat_d_ts = f.read()
+        with open(avatar_core_path, "r", encoding="utf-8") as f:
+            avatar_core = f.read()
+        with open(CHAT_STORE_PATH, "r", encoding="utf-8") as f:
+            chat_store = f.read()
+
+        self.assertIn("ttfa_ms?: number;", chat_d_ts)
+        self.assertIn("deiningFirstAudioPlayed", avatar_core)
+        self.assertIn("deiningFirstAudioPlayed", chat_store)
+        self.assertIn("ttfa_ms: recordedTtfaMs", chat_store)
+
+    def test_11_rendering_30fps_throttle(self):
+        """高リフレッシュレート環境におけるGPU競合防止用の30fpsスロットリング定義の検証。"""
+        avatar_core_path = os.path.join(
+            REPO_ROOT,
+            "backend",
+            "llama.cpp-b9873",
+            "tools",
+            "ui",
+            "static",
+            "deining",
+            "avatar-core-v2.js",
+        )
+        vrm_viewer_path = os.path.join(
+            REPO_ROOT,
+            "backend",
+            "llama.cpp-b9873",
+            "tools",
+            "ui",
+            "src",
+            "lib",
+            "vrm",
+            "vrm-viewer.svelte.ts",
+        )
+        with open(CHAT_STORE_PATH, "r", encoding="utf-8") as f:
+            chat_store = f.read()
+        with open(avatar_core_path, "r", encoding="utf-8") as f:
+            avatar_core = f.read()
+        with open(vrm_viewer_path, "r", encoding="utf-8") as f:
+            vrm_viewer = f.read()
+
+        # 1. chat.svelte.ts のテキストストリーミング 30fps スロットリング (33ms)
+        self.assertIn("MIN_UI_UPDATE_INTERVAL_MS = 33", chat_store)
+        self.assertIn("now - lastUiUpdateTime >= MIN_UI_UPDATE_INTERVAL_MS", chat_store)
+
+        # 2. avatar-core-v2.js の Live2D 60fps スロットリング & 解像度上限
+        self.assertIn("app.ticker.maxFPS = 60", avatar_core)
+        self.assertIn("Math.min(window.devicePixelRatio || 1, 1.5)", avatar_core)
+        self.assertIn("setFpsCap", avatar_core)
+
+        # 3. vrm-viewer.svelte.ts の VRM 60fps スロットリング
+        self.assertIn("VRM_TARGET_FRAME_INTERVAL_MS = 1000.0 / 60.0", vrm_viewer)
+        self.assertIn("time - lastRenderTime < VRM_TARGET_FRAME_INTERVAL_MS", vrm_viewer)
+
+    def test_12_cpu_interruption_mitigation(self):
+        """ハイブリッド推論(-ncmoe)時のCPU割り込みを防ぐコンテキスト内訳キャッシュ・onTimingsスロットリング・Markdownパーサーメモ化・スクロール制御の検証。"""
+        ctx_path = os.path.join(
+            REPO_ROOT,
+            "backend",
+            "llama.cpp-b9873",
+            "tools",
+            "ui",
+            "src",
+            "lib",
+            "utils",
+            "context-breakdown.ts",
+        )
+        md_path = os.path.join(
+            REPO_ROOT,
+            "backend",
+            "llama.cpp-b9873",
+            "tools",
+            "ui",
+            "src",
+            "lib",
+            "components",
+            "app",
+            "content",
+            "MarkdownContent",
+            "MarkdownContent.svelte",
+        )
+        scroll_path = os.path.join(
+            REPO_ROOT,
+            "backend",
+            "llama.cpp-b9873",
+            "tools",
+            "ui",
+            "src",
+            "lib",
+            "hooks",
+            "use-auto-scroll.svelte.ts",
+        )
+        with open(CHAT_STORE_PATH, "r", encoding="utf-8") as f:
+            chat_store = f.read()
+        with open(ctx_path, "r", encoding="utf-8") as f:
+            ctx_src = f.read()
+        with open(md_path, "r", encoding="utf-8") as f:
+            md_src = f.read()
+        with open(scroll_path, "r", encoding="utf-8") as f:
+            scroll_src = f.read()
+
+        # 1. context-breakdown.ts の3段階キャッシュ機構
+        self.assertIn("cachedPrefixEstimate", ctx_src)
+        self.assertIn("cachedFullTextEstimate", ctx_src)
+        self.assertIn("cachedBreakdownResult", ctx_src)
+
+        # 2. chat.svelte.ts の setTimeout 待機と onTimings 100ms スロットリング
+        self.assertIn("MIN_TIMINGS_UPDATE_INTERVAL_MS = 100", chat_store)
+        self.assertIn("now - lastTimingsUpdateTime >= MIN_TIMINGS_UPDATE_INTERVAL_MS", chat_store)
+        self.assertIn("streamingTimerId = setTimeout", chat_store)
+
+        # 3. MarkdownContent.svelte の processorMemo ($derived.by) と DOM 再スキャン抑制
+        self.assertIn("const processorMemo = $derived.by(() => {", md_src)
+        self.assertIn("const processor = () => processorMemo;", md_src)
+        self.assertIn("unstableNeedsSetup", md_src)
+
+        # 4. use-auto-scroll.svelte.ts の MutationObserver 50ms スロットリングと auto スクロール
+        self.assertIn("_scrollThrottleTimer", scroll_src)
+        self.assertIn("this.scrollToBottom('auto')", scroll_src)
+
+        # 5. ChatMessageAssistant.svelte のストリーミング中不要なTTS分割スキップと空Statusアニメーション抑止
+        asst_path = os.path.join(
+            REPO_ROOT,
+            "backend",
+            "llama.cpp-b9873",
+            "tools",
+            "ui",
+            "src",
+            "lib",
+            "components",
+            "app",
+            "chat",
+            "ChatMessages",
+            "ChatMessage",
+            "ChatMessageAssistant",
+            "ChatMessageAssistant.svelte",
+        )
+        launcher_path = os.path.join(REPO_ROOT, "backend", "data", "deinei_launcher.py")
+        with open(asst_path, "r", encoding="utf-8") as f:
+            asst_src = f.read()
+        with open(launcher_path, "r", encoding="utf-8") as f:
+            launcher_src = f.read()
+
+        self.assertIn("if (isStreaming && !isSyncDisplayConfigured && !isAudioSequenceActive) return [];", asst_src)
+        self.assertIn("Boolean(activeProcessingStatusText)", asst_src)
+
+        # 6. deinei_launcher.py の ABOVE_NORMAL_PRIORITY_CLASS と --prio 1
+        self.assertIn("ABOVE_NORMAL_PRIORITY_CLASS", launcher_src)
+        self.assertIn('"--prio"', launcher_src)
+        self.assertIn("elevate_running_llm_priority", launcher_src)
+
+    def test_13_updater_scripts(self):
+        """update.bat および installer/update.ps1 の存在・BOM/CRLF規定・ユーザーデータ保護ロジックを検証。"""
+        bat_path = os.path.join(REPO_ROOT, "update.bat")
+        ps1_path = os.path.join(REPO_ROOT, "installer", "update.ps1")
+        self.assertTrue(os.path.exists(bat_path), "update.bat must exist")
+        self.assertTrue(os.path.exists(ps1_path), "installer/update.ps1 must exist")
+
+        with open(bat_path, "rb") as f:
+            bat_raw = f.read()
+        with open(ps1_path, "rb") as f:
+            ps1_raw = f.read()
+
+        # 1. BOM & CRLF 規定チェック (AGENTS.md)
+        self.assertFalse(bat_raw.startswith(b"\xef\xbb\xbf"), "update.bat should not have BOM")
+        self.assertTrue(ps1_raw.startswith(b"\xef\xbb\xbf"), "installer/update.ps1 must have UTF-8 BOM")
+        self.assertNotIn(b"\n", bat_raw.replace(b"\r\n", b""), "update.bat must use CRLF line endings")
+        self.assertNotIn(b"\n", ps1_raw.replace(b"\r\n", b""), "installer/update.ps1 must use CRLF line endings")
+
+        bat_text = bat_raw.decode("utf-8")
+        ps1_text = ps1_raw.decode("utf-8-sig")
+
+        # 2. 絵文字禁止規定チェック
+        emoji_re = re.compile(r"[\U00010000-\U0010ffff]")
+        self.assertIsNone(emoji_re.search(bat_text), "update.bat must not contain emojis")
+        self.assertIsNone(emoji_re.search(ps1_text), "installer/update.ps1 must not contain emojis")
+
+        # 3. 同期・保護ロジックの存在確認
+        self.assertIn(r"installer\update.ps1", bat_text)
+        self.assertIn("git pull --ff-only", ps1_text)
+        self.assertIn(r"backend\llama.cpp-b9873\custom_public", ps1_text)
+        self.assertIn("start_ai_servers.bat", ps1_text)
 
 
 if __name__ == "__main__":

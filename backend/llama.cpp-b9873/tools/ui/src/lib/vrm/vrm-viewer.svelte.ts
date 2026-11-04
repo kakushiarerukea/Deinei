@@ -521,14 +521,22 @@ export function updateMouseTarget(x: number, y: number) {
 export function startAnimationLoop() {
 	if (animFrameId !== null) return;
 	lastTime = performance.now();
+	let lastRenderTime = 0;
+	const VRM_TARGET_FRAME_INTERVAL_MS = 1000.0 / 60.0; // 泥濘: 240Hz等の高リフレッシュレート環境でのGPU競合を防ぐ 30fps スロットリング (約33.3ms)
 
 	const renderLoop = (time: number) => {
 		animFrameId = requestAnimationFrame(renderLoop);
 
-		const rawDelta = (time - lastTime) / 1000.0;
-		lastTime = time;
-
 		if (!isVisible || !renderer || !scene || !camera) return;
+
+		// 泥濘: 30fps (約33.3ms) 未満の間隔では Three.js の WebGL レンダリングおよびボーン更新をスキップ
+		if (lastRenderTime > 0 && time - lastRenderTime < VRM_TARGET_FRAME_INTERVAL_MS) {
+			return;
+		}
+
+		const rawDelta = lastRenderTime > 0 ? (time - lastRenderTime) / 1000.0 : (time - lastTime) / 1000.0;
+		lastTime = time;
+		lastRenderTime = time;
 
 		// 生 delta が 0.5 秒を超えたら不連続スキップ
 		const isDeltaDiscontinuous = rawDelta > 0.5;

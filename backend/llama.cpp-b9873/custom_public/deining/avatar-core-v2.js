@@ -454,6 +454,11 @@ let isProcessingTts = false;
 let currentAudioPlayer = null;
 let ttsGenerationId = 0;
 let ttsAbortController = null;
+let hasDispatchedFirstAudio = false;
+
+window.resetFirstAudioPlayed = function () {
+    hasDispatchedFirstAudio = false;
+};
 
 // 先読みプリフェッチAPI (バックグラウンドで合成完了させておき、再生時に待ち時間0秒を実現)
 window.prefetchTTS = function (text) {
@@ -635,6 +640,12 @@ async function processTtsQueue() {
                 if (currentGen !== ttsGenerationId) return;
                 isSpeaking = true;
                 dispatchTtsState();
+                if (!hasDispatchedFirstAudio) {
+                    hasDispatchedFirstAudio = true;
+                    window.dispatchEvent(new CustomEvent('deiningFirstAudioPlayed', {
+                        detail: { timestamp: performance.now(), genId: currentGen }
+                    }));
+                }
             });
 
             audio.addEventListener('ended', () => {
@@ -860,6 +871,12 @@ window.synthesizeAndPlayTTS = async function (text, force = false, rawTextForEmo
                     clearTimeout(timeoutId);
                     dispatchTtsState();
                     console.log('▶️ [パイプライン] 音声再生開始 ➔ LLMストリーム再開 (先読み開始)');
+                    if (!hasDispatchedFirstAudio) {
+                        hasDispatchedFirstAudio = true;
+                        window.dispatchEvent(new CustomEvent('deiningFirstAudioPlayed', {
+                            detail: { timestamp: performance.now(), genId: currentGen }
+                        }));
+                    }
                     safeResolve({ success: true, started: true });
                 });
 
@@ -918,6 +935,7 @@ window.synthesizeAndPlayTTS = async function (text, force = false, rawTextForEmo
 };
 
 window.stopTTS = function (clearPrefetch = false) {
+    hasDispatchedFirstAudio = false;
     console.log(`[stopTTS] Stopping current TTS audio and clearing queue (clearPrefetch=${clearPrefetch})`);
     ttsGenerationId++;
     if (ttsAbortController) {
@@ -1384,9 +1402,14 @@ async function mountAvatarSystem() {
             resizeTo: container,
             transparent: true,
             backgroundAlpha: 0,
-            resolution: window.devicePixelRatio || 1,
+            resolution: Math.min(window.devicePixelRatio || 1, 1.5),
             autoDensity: true
         });
+
+        // 泥濘: 240Hz等の高リフレッシュレート環境におけるGPU VRAMメモリ帯域競合を防止する Live2D 30fps スロットリング
+        if (app && app.ticker) {
+            app.ticker.maxFPS = 60;
+        }
 
         // バックエンドから自動検知されたLive2Dモデル一覧を取得
         let detectedModels = [];
@@ -1419,6 +1442,12 @@ async function mountAvatarSystem() {
                 } else {
                     if (app.ticker.started) app.ticker.stop();
                 }
+            }
+        };
+
+        window.deiningAvatarCore.setFpsCap = (fps) => {
+            if (app && app.ticker) {
+                app.ticker.maxFPS = fps > 0 ? fps : 0;
             }
         };
 

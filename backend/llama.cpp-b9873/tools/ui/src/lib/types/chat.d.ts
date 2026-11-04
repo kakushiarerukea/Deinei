@@ -53,6 +53,7 @@ export interface ChatMessageTimings {
 	predicted_n?: number;
 	prompt_ms?: number;
 	prompt_n?: number;
+	ttfa_ms?: number;
 	agentic?: ChatMessageAgenticTimings;
 }
 

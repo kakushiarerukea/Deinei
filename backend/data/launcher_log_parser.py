@@ -443,6 +443,46 @@ def parse_profile_bat(content: str) -> Dict[str, Any]:
     return profile
 
 
+def get_total_system_ram_gb() -> float:
+    """システムの総物理RAM容量(GB)を取得する。取得失敗時は32.0GBとして扱う。"""
+    try:
+        import os
+        if os.name == "nt":
+            import ctypes
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+            stat = MEMORYSTATUSEX()
+            stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+                return round(stat.ullTotalPhys / (1024 ** 3), 1)
+    except Exception:
+        pass
+    try:
+        import psutil
+        return round(psutil.virtual_memory().total / (1024 ** 3), 1)
+    except Exception:
+        pass
+    return 32.0
+
+
+def is_step1_kv_preset(profile: Optional[Dict[str, Any]]) -> bool:
+    """16GB または 24GB プリセットが適用されているか判定する (Step 1 KVキャッシュ最適化の対象判定)。"""
+    if not isinstance(profile, dict):
+        return True
+    p_name = str(profile.get("PROFILE_NAME", "16GB (High)")).strip()
+    return ("16GB" in p_name) or ("24GB" in p_name)
+
+
 def serialize_profile_bat(profile: Dict[str, Any]) -> str:
     """設定辞書から deining_profile.bat のバッチファイル内容 (CRLF) を生成する。"""
     p_name = str(profile.get("PROFILE_NAME", "16GB (High)"))

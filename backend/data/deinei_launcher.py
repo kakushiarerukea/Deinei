@@ -42,12 +42,16 @@ os.environ.setdefault("UV_PYTHON_INSTALL_DIR", os.path.join(_CACHE_DIR, "uv_pyth
 os.environ.setdefault("PIP_CACHE_DIR", os.path.join(_CACHE_DIR, "pip"))
 os.environ.setdefault("HF_HOME", os.path.join(_CACHE_DIR, "huggingface"))
 os.environ.setdefault("TORCH_HOME", os.path.join(_CACHE_DIR, "torch"))
+# CUDA カーネルのオンデマンド遅延ロード (起動時コミットメモリの抑制)
+os.environ.setdefault("CUDA_MODULE_LOADING", "LAZY")
 
 if _CURRENT_DIR not in sys.path:
     sys.path.insert(0, _CURRENT_DIR)
 
 from launcher_log_parser import (
+    get_total_system_ram_gb,
     is_noise_log_line,
+    is_step1_kv_preset,
     parse_flask_log_line,
     parse_gateway_log_line,
     parse_llm_log_line,
@@ -65,6 +69,32 @@ from net_discovery import (
 )
 
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+ABOVE_NORMAL_PRIORITY_CLASS = 0x00008000 if os.name == "nt" else 0
+
+
+def elevate_running_llm_priority() -> bool:
+    """稼働中の llama-server.exe プロセスの優先度を ABOVE_NORMAL_PRIORITY_CLASS に引き上げる。"""
+    if os.name != "nt":
+        return False
+    ps_cmd = (
+        "$procs = Get-Process -Name 'llama-server' -ErrorAction SilentlyContinue; "
+        "foreach ($p in $procs) { "
+        "  try { $p.PriorityClass = 'AboveNormal'; Write-Output ('Elevated PID ' + $p.Id) } catch {} "
+        "}"
+    )
+    try:
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=CREATE_NO_WINDOW,
+            timeout=5,
+        )
+        return "Elevated PID" in (res.stdout or "")
+    except Exception:
+        return False
 
 
 def _normalize_to_python_exe(py_path: str) -> str:
@@ -1054,6 +1084,7 @@ class DeineiLauncherGUI:
                 tts_alive = tts_ok or ("LOADING" in tts_msg)
 
                 if llm_alive and flask_alive and tts_alive:
+                    elevate_running_llm_priority()
                     self._emit_sys_log("[OK] 3つのバックエンドサーバー (8080, 5000, 5001) は既に稼働またはロード中です。")
                     self._start_gateway_locked()
                     return
@@ -1124,6 +1155,26 @@ class DeineiLauncherGUI:
         model_path = find_llm_model(self.root_dir)
         ncmoe = str(self.profile.get("NCMOE", 9))
         mmproj_raw = str(self.profile.get("MMPROJ_ARGS", "")).strip()
+        total_ram = get_total_system_ram_gb()
+        mmap_args = [] if total_ram < 24.0 else ["--no-mmap"]
+        cache_reuse_val = os.environ.get("DEINEI_CACHE_REUSE", "256")
+        step1_enabled = is_step1_kv_preset(self.profile)
+        if step1_enabled:
+            kv_cache_dir = os.path.join(sandbox_dir, "kv_cache")
+            os.makedirs(kv_cache_dir, exist_ok=True)
+            slot_cache_args = [
+                "--slots",
+                "--slot-save-path",
+                kv_cache_dir,
+                "--cache-reuse",
+                cache_reuse_val,
+            ]
+        else:
+            slot_cache_args = [
+                "--no-slots",
+                "--cache-reuse",
+                cache_reuse_val,
+            ]
 
         cmd = [
             llama_exe,
@@ -1136,8 +1187,8 @@ class DeineiLauncherGUI:
             [
                 "--host",
                 "127.0.0.1",
-                "--no-slots",
-                "--no-mmap",
+                *slot_cache_args,
+                *mmap_args,
                 "-fit",
                 "off",
                 "-c",
@@ -1146,10 +1197,12 @@ class DeineiLauncherGUI:
                 "99",
                 "-ncmoe",
                 ncmoe,
+                "--prio",
+                "1",
+                "--prio-batch",
+                "1",
                 "--flash-attn",
                 "on",
-                "--cache-reuse",
-                "256",
                 "-np",
                 "1",
                 "--parallel",
@@ -1163,8 +1216,10 @@ class DeineiLauncherGUI:
             ]
         )
 
+        mmap_tag = f"RAM {total_ram}GB (mmap節約モード)" if total_ram < 24.0 else f"RAM {total_ram}GB (--no-mmap常駐)"
+        step1_tag = f"Step1 KV最適化: ON (--slots --cache-reuse {cache_reuse_val})" if step1_enabled else "Step1 KV最適化: OFF (標準)"
         self._emit_sys_log(
-            f"[INFO] [2/3] LLM Server (8080) を起動中... (Model: {os.path.basename(model_path)}, -ncmoe {ncmoe})"
+            f"[INFO] [2/3] LLM Server (8080) を起動中... (Model: {os.path.basename(model_path)}, -ncmoe {ncmoe}, {step1_tag}, {mmap_tag})"
         )
         self._spawn_managed_process("llm", cmd, cwd=sandbox_dir)
 
@@ -1233,7 +1288,9 @@ class DeineiLauncherGUI:
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUTF8"] = "1"
         env["PYTHONUNBUFFERED"] = "1"
+        env["CUDA_MODULE_LOADING"] = "LAZY"
 
+        spawn_flags = CREATE_NO_WINDOW | (ABOVE_NORMAL_PRIORITY_CLASS if key == "llm" else 0)
         try:
             proc = subprocess.Popen(
                 cmd,
@@ -1242,7 +1299,7 @@ class DeineiLauncherGUI:
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
                 env=env,
-                creationflags=CREATE_NO_WINDOW,
+                creationflags=spawn_flags,
             )
             self.procs[key] = proc
             t = threading.Thread(target=self._reader_thread, args=(key, proc), daemon=True)
@@ -1892,13 +1949,23 @@ def run_cli_fallback(args: argparse.Namespace) -> None:
     procs: List[subprocess.Popen] = []
     try:
         if os.path.isfile(llama_exe):
+            total_ram = get_total_system_ram_gb()
+            mmap_args = [] if total_ram < 24.0 else ["--no-mmap"]
+            cache_reuse_val = os.environ.get("DEINEI_CACHE_REUSE", "256")
+            if is_step1_kv_preset(profile):
+                kv_cache_dir = os.path.join(sandbox_dir, "kv_cache")
+                os.makedirs(kv_cache_dir, exist_ok=True)
+                slot_cache_args = ["--slots", "--slot-save-path", kv_cache_dir, "--cache-reuse", cache_reuse_val]
+            else:
+                slot_cache_args = ["--no-slots", "--cache-reuse", cache_reuse_val]
             cmd_llm = [
-                llama_exe, "-m", model_path, "--host", "127.0.0.1", "--no-slots", "--no-mmap",
+                llama_exe, "-m", model_path, "--host", "127.0.0.1", *slot_cache_args, *mmap_args,
                 "-fit", "off", "-c", "16384", "-ngl", "99", "-ncmoe", ncmoe,
-                "--flash-attn", "on", "--cache-reuse", "256", "-np", "1", "--parallel", "1",
+                "--prio", "1", "--prio-batch", "1",
+                "--flash-attn", "on", "-np", "1", "--parallel", "1",
                 "--path", "./custom_public", "--port", "8080", "--chat-template-file", "gemma_chat_template.jinja",
             ]
-            procs.append(subprocess.Popen(cmd_llm, cwd=sandbox_dir))
+            procs.append(subprocess.Popen(cmd_llm, cwd=sandbox_dir, creationflags=ABOVE_NORMAL_PRIORITY_CLASS))
         procs.append(subprocess.Popen([py_exe, "-X", "utf8", "-u", "tts_server.py"], cwd=os.path.join(_ROOT_DIR, "backend", "Irodori-TTS")))
         procs.append(subprocess.Popen([py_exe, "-X", "utf8", "-u", "server.py"], cwd=os.path.join(_ROOT_DIR, "backend", "data")))
         print("[INFO] サーバーを起動しました。終了するには Ctrl+C を押してください。")
@@ -2284,7 +2351,7 @@ class LauncherApiBridge:
         env = os.environ.copy()
         env["PYTHONUTF8"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
-        flags = CREATE_NO_WINDOW if os.name == "nt" else 0
+        flags = (CREATE_NO_WINDOW | (ABOVE_NORMAL_PRIORITY_CLASS if key == "llm" else 0)) if os.name == "nt" else 0
         try:
             proc = subprocess.Popen(
                 cmd,
@@ -2328,14 +2395,34 @@ class LauncherApiBridge:
         model_path = find_llm_model(self.root_dir)
         ncmoe = str(self.profile.get("NCMOE", 9))
         mmproj_raw = str(self.profile.get("MMPROJ_ARGS", "")).strip()
+        total_ram = get_total_system_ram_gb()
+        mmap_args = [] if total_ram < 24.0 else ["--no-mmap"]
+        cache_reuse_val = os.environ.get("DEINEI_CACHE_REUSE", "256")
+        step1_enabled = is_step1_kv_preset(self.profile)
+        if step1_enabled:
+            kv_cache_dir = os.path.join(sandbox_dir, "kv_cache")
+            os.makedirs(kv_cache_dir, exist_ok=True)
+            slot_cache_args = [
+                "--slots",
+                "--slot-save-path",
+                kv_cache_dir,
+                "--cache-reuse",
+                cache_reuse_val,
+            ]
+        else:
+            slot_cache_args = [
+                "--no-slots",
+                "--cache-reuse",
+                cache_reuse_val,
+            ]
         cmd = [
             llama_exe,
             "-m",
             model_path,
             "--host",
             "127.0.0.1",
-            "--no-slots",
-            "--no-mmap",
+            *slot_cache_args,
+            *mmap_args,
             "-fit",
             "off",
             "-c",
@@ -2346,8 +2433,6 @@ class LauncherApiBridge:
             ncmoe,
             "--flash-attn",
             "on",
-            "--cache-reuse",
-            "256",
             "-np",
             "1",
             "--parallel",
@@ -2365,7 +2450,9 @@ class LauncherApiBridge:
         ]
         if mmproj_raw:
             cmd.extend(mmproj_raw.split())
-        self._emit_sys_log(f"[INFO] LLM Server (8080) を起動しています... (-ncmoe {ncmoe})")
+        mmap_tag = f"RAM {total_ram}GB (mmap節約モード)" if total_ram < 24.0 else f"RAM {total_ram}GB (--no-mmap常駐)"
+        step1_tag = f"Step1 KV最適化: ON (--slots --cache-reuse {cache_reuse_val})" if step1_enabled else "Step1 KV最適化: OFF (標準)"
+        self._emit_sys_log(f"[INFO] LLM Server (8080) を起動しています... (-ncmoe {ncmoe}, {step1_tag}, {mmap_tag})")
         self._spawn_process("llm", cmd, cwd=sandbox_dir)
 
     def _start_tts_locked(self) -> None:
@@ -2464,6 +2551,7 @@ class LauncherApiBridge:
                 tts_alive = tts_ok or ("LOADING" in tts_msg)
 
                 if llm_alive and flask_alive and tts_alive:
+                    elevate_running_llm_priority()
                     self._emit_sys_log("[OK] 3つのバックエンドサーバー (8080, 5000, 5001) は既に稼働またはロード中です。")
                     self._start_gateway_locked()
                     return

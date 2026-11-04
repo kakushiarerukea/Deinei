@@ -10,6 +10,12 @@ import re
 import os
 import sys
 
+# CUDA カーネルのオンデマンド遅延ロード (起動時の仮想コミットメモリ 2〜4GB 削減)
+os.environ.setdefault("CUDA_MODULE_LOADING", "LAZY")
+
+import gc
+import torch
+
 # 統合キャッシュ (.cache) の設定: irodori_tts インポート前に HF_HOME / TORCH_HOME を確定
 _TTS_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT_DIR = os.path.dirname(os.path.dirname(_TTS_DIR))
@@ -233,6 +239,9 @@ def load_model():
             
             # VoiceDesignモデルをアンロード
             clear_cached_runtime()
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             print("[INFO] VoiceDesignモデルをメモリから解放しました。")
         else:
             print(f"[INFO] 既存のリファレンス音声 ({REFERENCE_WAV_PATH}) を使用します。")
@@ -240,6 +249,9 @@ def load_model():
         print("[INFO] Baseモデル（VoiceClone用）をロードしています...")
         key_base = _build_runtime_key_base()
         get_cached_runtime(key_base)
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         _TTS_STATE["ready"] = True
         _TTS_STATE["error"] = None
         print("[OK] Baseモデルのロードが完了しました。")
@@ -387,6 +399,13 @@ def generate_tts(req: TTSRequest):
     buf = io.BytesIO()
     sf.write(buf, final_audio, sample_rate, format='WAV', subtype='PCM_16')
     buf.seek(0)
+    
+    try:
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
     
     return Response(content=buf.read(), media_type="audio/wav")
 

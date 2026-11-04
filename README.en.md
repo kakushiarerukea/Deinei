@@ -71,7 +71,7 @@
 > Running `install.bat` directly from inside the ZIP file without extracting will execute inside Windows Temp and fail.
 
 ### Step 1: Download and Extract
-1. Download the release package (e.g., `泥濘（Deinei）v0.1.0.zip` or the repository ZIP).
+1. Download the release package (e.g., `泥濘（Deinei）v0.1.2.zip` or the repository ZIP).
 2. Right-click the ZIP file and select **"Extract All..."** to a standard folder.
    - [TIP] We recommend extracting to a short path without spaces or non-ASCII characters (e.g., `C:\deinei` or `D:\deinei`).
 
@@ -87,6 +87,18 @@
 2. The splash window and desktop GUI launcher will open.
 3. Once all services (LLM: 8080, RAG: 5000, TTS: 5001, Gateway: 8090) are initialized, the chat interface opens in your browser automatically.
    - [TIP] To stop all services, click **"Stop All Servers" (全サーバー停止)** on the top right of the launcher window.
+
+
+### [Update] Updating Deinei
+
+If you are already running an earlier version of Deinei, you can upgrade to the latest release while keeping your conversation history (`chats/`), memory DB (`chroma_db/`), and model weights (`*.gguf`) intact.
+
+- **Git clone users**:
+  - Simply double-click **`update.bat`** in your root folder (it automatically pulls the latest changes and refreshes the sandbox assets).
+- **ZIP release users**:
+  - Download the latest release ZIP and **extract/overwrite it directly into your existing `deinei` folder**.
+  - Double-click **`update.bat`** in the updated folder to synchronize the runtime environment.
+  - *From this version onward, future updates can be applied automatically by simply double-clicking `update.bat`.*
 
 ---
 
@@ -205,7 +217,7 @@ For complete technical specifications, security models, model download instructi
 
 ## [Limitations] Known Limitations
 
-1. **Current Pipeline is Optimized for Japanese**: In v0.1.0, default models (Irodori-TTS, ruri-v3-310m text embedding, ReazonSpeech-K2 STT) and extended documentation (`docs/*.md`) are tailored specifically for Japanese language environments. Native English pipelines and multilingual models are planned in the roadmap.
+1. **Current Pipeline is Optimized for Japanese**: In v0.1.2, default models (Irodori-TTS, ruri-v3-310m text embedding, ReazonSpeech-K2 STT) and extended documentation (`docs/*.md`) are tailored specifically for Japanese language environments. Native English pipelines and multilingual models are planned in the roadmap.
 2. **Speech Recognition (STT) is Experimental**: Voice input via `ReazonSpeech-K2` is experimental and may be sensitive to ambient background noise or microphone levels.
 3. **Vision Encoder Enabled by Default Only on 24GB+ GPUs**: Due to VRAM allocation priority, multimodal image recognition (`mmproj`) is enabled by default on 24GB profiles (can be enabled manually on smaller GPUs).
 4. **Designed for 16,384 Context Window**: System prompt, memory injection, raw history window, and generation slots are budgeted for 16k tokens.

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Terminal, Database, RefreshCw, Sparkles, Sliders, RotateCcw, ChevronDown, ChevronUp, Type, Archive, FileText } from '@lucide/svelte';
+	import { Terminal, Database, RefreshCw, Sparkles, Sliders, RotateCcw, ChevronDown, ChevronUp, Type, Archive, FileText, Network } from '@lucide/svelte';
 	import { Switch } from '$lib/components/ui/switch';
 	import { conversationsStore } from '$lib/stores/conversations.svelte';
 	import {
@@ -27,6 +27,9 @@
 	const isRawTextMode = $derived(Boolean(config().showRawPlainText));
 
 
+
+	// 有向木世界線フィルタ（エンベッディング分離）設定
+	let isWorldlineFilterEnabled = $state(true);
 
 	// タイプライター順次表示アニメーション設定
 	let isTypewriterEnabled = $state(true);
@@ -99,6 +102,11 @@
 
 
 
+		const savedWorldlineFilter = localStorage.getItem('deining_worldline_filter_enabled');
+		if (savedWorldlineFilter !== null) {
+			isWorldlineFilterEnabled = savedWorldlineFilter === 'true';
+		}
+
 		const savedTypewriter = localStorage.getItem('deining_typewriter_enabled');
 		if (savedTypewriter !== null) {
 			isTypewriterEnabled = savedTypewriter === 'true';
@@ -142,6 +150,14 @@
 		factTemp = 0.2;
 		factMaxTokens = 4096;
 		saveSettings();
+	}
+
+	function handleWorldlineFilterChange(checked: boolean) {
+		isWorldlineFilterEnabled = checked;
+		if (typeof localStorage !== 'undefined') {
+			localStorage.setItem('deining_worldline_filter_enabled', checked ? 'true' : 'false');
+			window.dispatchEvent(new CustomEvent('memoryUpdated'));
+		}
 	}
 
 	function toggleAutoSummarize() {
@@ -256,6 +272,19 @@
 		</div>
 
 
+
+		<!-- Worldline Memory Isolation (Filter) Settings -->
+		<div class="flex flex-col gap-3 bg-muted/40 p-3 rounded-lg border border-border/50">
+			<div class="flex items-center justify-between">
+				<h4 class="text-xs font-semibold uppercase text-muted-foreground flex items-center gap-1.5">
+					<Network class="w-3.5 h-3.5" /> {t('debug.worldlineFilterTitle', '有向木エンベッディング分離 (世界線フィルタ)')}
+				</h4>
+				<Switch checked={isWorldlineFilterEnabled} onCheckedChange={handleWorldlineFilterChange} />
+			</div>
+			<div class="text-[11px] text-muted-foreground">
+				{t('debug.worldlineFilterDesc', '有向木会話ステートに基づき、別ブランチの記憶（Fact/Episode）を想起対象から除外（棲み分け）します。OFFにすると全世界線の記憶を横断して想起します。')}
+			</div>
+		</div>
 
 		<!-- Typewriter Animation Settings -->
 		<div class="flex flex-col gap-3 bg-muted/40 p-3 rounded-lg border border-border/50">

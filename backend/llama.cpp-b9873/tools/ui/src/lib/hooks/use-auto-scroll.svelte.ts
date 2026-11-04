@@ -118,7 +118,7 @@ export class AutoScrollController {
 		if (this._disabled || this._scrollInterval) return;
 
 		this._scrollInterval = setInterval(() => {
-			this.scrollToBottom();
+			this.scrollToBottom('auto');
 		}, AUTO_SCROLL_INTERVAL);
 	}
 
@@ -179,18 +179,21 @@ export class AutoScrollController {
 		this._doStopObserving();
 	}
 
+	private _scrollThrottleTimer: ReturnType<typeof setTimeout> | null = null;
+
 	private _doStartObserving(): void {
 		if (!this._container || this._mutationObserver) return;
 
 		this._mutationObserver = new MutationObserver(() => {
 			if (!this._autoScrollEnabled || this._rafPending) return;
 			this._rafPending = true;
-			requestAnimationFrame(() => {
+			this._scrollThrottleTimer = setTimeout(() => {
 				this._rafPending = false;
+				this._scrollThrottleTimer = null;
 				if (this._autoScrollEnabled && this._container) {
 					this._container.scrollTop = this._container.scrollHeight;
 				}
-			});
+			}, 50);
 		});
 
 		this._mutationObserver.observe(this._container, {
@@ -204,6 +207,10 @@ export class AutoScrollController {
 		if (this._mutationObserver) {
 			this._mutationObserver.disconnect();
 			this._mutationObserver = null;
+		}
+		if (this._scrollThrottleTimer !== null) {
+			clearTimeout(this._scrollThrottleTimer);
+			this._scrollThrottleTimer = null;
 		}
 		this._rafPending = false;
 	}

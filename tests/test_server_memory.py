@@ -359,6 +359,95 @@ class TestServerMemoryAndApi(unittest.TestCase):
         leaked = after_wavs - before_wavs
         self.assertEqual(len(leaked), 0, f"STT エラー時に一時ファイルが残留している: {leaked}")
 
+    def test_step1_kv_slot_lazy_save_restore(self):
+        """16GB/24GBプリセット時のみKVキャッシュ退避・遅延復元が動作し、連続内部推論でsaveが1回に抑制されることを検証"""
+        from unittest.mock import MagicMock, patch
+
+        orig_profile_path = server._PROFILE_BAT_PATH
+        tmp_profile = os.path.join(_TEST_SANDBOX_DIR, "test_deining_profile.bat")
+        server._PROFILE_BAT_PATH = tmp_profile
+        try:
+            # 1. 12GB プリセット時は無効
+            with open(tmp_profile, "w", encoding="utf-8") as f:
+                f.write("@echo off\nset PROFILE_NAME=12GB (Medium)\n")
+            self.assertFalse(server._is_step1_kv_preset_enabled())
+            server._mark_main_chat_kv_active()
+            with patch.object(server._http_session, "post") as mock_post:
+                self.assertFalse(server._save_main_chat_kv_if_needed("internal_summary"))
+                mock_post.assert_not_called()
+
+            # 2. 16GB プリセット時は有効 & 連続3回の内部推論で save は最初の1回のみ
+            with open(tmp_profile, "w", encoding="utf-8") as f:
+                f.write("@echo off\nset PROFILE_NAME=16GB (High)\n")
+            self.assertTrue(server._is_step1_kv_preset_enabled())
+            server._mark_main_chat_kv_active()
+
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.content = b'{"n_saved": 1200, "n_restored": 1200, "timings": {"save_ms": 45.0, "restore_ms": 38.0}}'
+            mock_resp.json.return_value = {
+                "n_saved": 1200,
+                "n_restored": 1200,
+                "timings": {"save_ms": 45.0, "restore_ms": 38.0},
+            }
+
+            with patch.object(server._http_session, "post", return_value=mock_resp) as mock_post:
+                # 要約 -> 事実抽出 -> 子要素抽出 -> Stage 1 検索 の4連続内部推論をシミュレート
+                self.assertTrue(server._save_main_chat_kv_if_needed("summary"))
+                self.assertFalse(server._save_main_chat_kv_if_needed("fact_extract"))
+                self.assertFalse(server._save_main_chat_kv_if_needed("child_extract"))
+                self.assertFalse(server._save_main_chat_kv_if_needed("stage1_search"))
+                self.assertEqual(mock_post.call_count, 1)
+                self.assertIn("/slots/0?action=save", mock_post.call_args[0][0])
+
+                # 次のメイン会話推論直前に1回だけ restore される
+                mock_post.reset_mock()
+                self.assertTrue(server._restore_main_chat_kv_if_needed("main_chat"))
+                self.assertFalse(server._restore_main_chat_kv_if_needed("main_chat_second"))
+                self.assertEqual(mock_post.call_count, 1)
+                self.assertIn("/slots/0?action=restore", mock_post.call_args[0][0])
+        finally:
+            server._PROFILE_BAT_PATH = orig_profile_path
+
+
+    def test_13_worldline_filter_toggle(self):
+        """有向木世界線フィルタ(worldline_filter_enabled)のON/OFFで記憶の棲み分けが切り替わることを検証。"""
+        sid = "test_worldline_filter_session"
+        # ブランチAの記憶を登録
+        r_a = self.client.post(
+            f"/memory/add?session_id={sid}&message_id=msg_branch_a",
+            json={"texts": ["ブランチAの特有記憶データ"]},
+            headers=self.headers,
+        )
+        self.assertEqual(r_a.status_code, 200)
+
+        # ブランチBの記憶を登録
+        r_b = self.client.post(
+            f"/memory/add?session_id={sid}&message_id=msg_branch_b",
+            json={"texts": ["ブランチBの特有記憶データ"]},
+            headers=self.headers,
+        )
+        self.assertEqual(r_b.status_code, 200)
+
+        # 1. worldline_filter_enabled=true (既定) かつ active_message_ids=msg_branch_a の場合 -> ブランチAのみ取得される
+        res_filtered = self.client.get(
+            f"/memory/list?session_id={sid}&active_message_ids=msg_branch_a&worldline_filter_enabled=true",
+            headers=self.headers,
+        )
+        self.assertEqual(res_filtered.status_code, 200)
+        data_filtered = res_filtered.get_json()
+        self.assertEqual(len(data_filtered["memories"]), 1)
+        self.assertIn("ブランチA", data_filtered["memories"][0]["text"])
+
+        # 2. worldline_filter_enabled=false の場合 -> active_message_ids が指定されていても世界線を越えて全記憶(2件)が返る
+        res_unfiltered = self.client.get(
+            f"/memory/list?session_id={sid}&active_message_ids=msg_branch_a&worldline_filter_enabled=false",
+            headers=self.headers,
+        )
+        self.assertEqual(res_unfiltered.status_code, 200)
+        data_unfiltered = res_unfiltered.get_json()
+        self.assertEqual(len(data_unfiltered["memories"]), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -12,6 +12,7 @@ if hasattr(sys.stderr, 'reconfigure'):
         pass
 
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+os.environ.setdefault("CUDA_MODULE_LOADING", "LAZY")
 
 # 統合キャッシュ (.cache) の設定: 他ツール (SD/ComfyUI等) の環境と分離し、アンインストール時の一括削除を容易化
 _SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -1216,6 +1217,17 @@ def list_memory():
             where={"channel_id": "web_ui"}
         )
         
+        # 世界線フィルタの有効判定
+        raw_filter_enabled = request.args.get('worldline_filter_enabled', 'true')
+        if request.is_json:
+            data = _get_json_dict(silent=True)
+            if 'worldline_filter_enabled' in data:
+                raw_filter_enabled = data.get('worldline_filter_enabled')
+        if isinstance(raw_filter_enabled, str):
+            filter_enabled = raw_filter_enabled.lower() not in ('false', '0', 'off')
+        else:
+            filter_enabled = bool(raw_filter_enabled)
+
         # 世界線フィルタのIDセット取得
         active_ids_raw = request.args.get('active_message_ids')
         if not active_ids_raw and request.is_json:
@@ -1223,7 +1235,7 @@ def list_memory():
             active_ids_raw = data.get('active_message_ids')
             
         path_id_set = None
-        if active_ids_raw:
+        if filter_enabled and active_ids_raw:
             if isinstance(active_ids_raw, str):
                 path_id_set = set(active_ids_raw.split(','))
             elif isinstance(active_ids_raw, list):
@@ -1995,6 +2007,116 @@ def _do_web_search(query_text, session_id='default_session'):
         print(f"[WARN] プロキシ用Web検索エラー: {e}")
         return []
 
+# ====== Step 1 KVキャッシュ保護 (16GB / 24GB プリセット限定) ======
+_kv_slot_lock = threading.Lock()
+_main_chat_has_kv = False
+_main_chat_kv_saved = False
+_KV_SLOT_SAVE_FILENAME = "main_chat.bin"
+_PROFILE_BAT_PATH = os.path.join(_PROJECT_ROOT_DIR, "deining_profile.bat")
+
+
+def _is_step1_kv_preset_enabled() -> bool:
+    """deining_profile.bat の PROFILE_NAME を確認し、16GB または 24GB プリセット時のみ True を返す。"""
+    try:
+        if not os.path.isfile(_PROFILE_BAT_PATH):
+            return True
+        with open(_PROFILE_BAT_PATH, "r", encoding="utf-8", errors="replace") as f:
+            raw = f.read()
+        for raw_line in raw.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("::") or line.lower().startswith("@echo"):
+                continue
+            m = re.match(r'^set\s+"?PROFILE_NAME=([^"]*)"?\s*$', line, re.IGNORECASE)
+            if m:
+                p_name = m.group(1).strip()
+                return ("16GB" in p_name) or ("24GB" in p_name)
+        return True
+    except Exception:
+        return False
+
+
+def _save_main_chat_kv_if_needed(reason: str = "internal") -> bool:
+    """内部推論（要約・事実抽出・Stage 1検索等）の直前にメイン会話のKVキャッシュを退避する。
+    遅延復元 (Lazy Restore) 方式により、連続する内部推論では最初の1回のみ save を行う。
+    """
+    global _main_chat_kv_saved
+    if not _is_step1_kv_preset_enabled():
+        return False
+    with _kv_slot_lock:
+        if not _main_chat_has_kv or _main_chat_kv_saved:
+            return False
+        try:
+            resp = _http_session.post(
+                f"{LLAMA_SERVER_URL}/slots/0?action=save",
+                json={"filename": _KV_SLOT_SAVE_FILENAME},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                _main_chat_kv_saved = True
+                data = resp.json() if resp.content else {}
+                n_saved = data.get("n_saved", 0)
+                save_ms = (data.get("timings") or {}).get("save_ms", 0.0)
+                print(
+                    f"[INFO] [KV Cache Slot] メイン会話KVキャッシュを退避しました ({reason}: {n_saved} tok, {save_ms:.1f} ms)",
+                    flush=True,
+                )
+                return True
+            else:
+                print(
+                    f"[WARN] [KV Cache Slot] save 失敗 (HTTP {resp.status_code}, reason={reason}): {resp.text[:120]}",
+                    flush=True,
+                )
+        except Exception as e:
+            _search_logger.debug(f"[KV Cache Slot] save スキップ ({reason}): {e}")
+            print(f"[WARN] [KV Cache Slot] save 例外 ({reason}): {e}", flush=True)
+        return False
+
+
+def _restore_main_chat_kv_if_needed(reason: str = "main_chat") -> bool:
+    """メイン会話推論の直前に、退避済みのKVキャッシュがあればスロット0へ復元する。"""
+    global _main_chat_kv_saved
+    if not _is_step1_kv_preset_enabled():
+        with _kv_slot_lock:
+            _main_chat_kv_saved = False
+        return False
+    with _kv_slot_lock:
+        if not _main_chat_kv_saved:
+            return False
+        _main_chat_kv_saved = False
+        try:
+            resp = _http_session.post(
+                f"{LLAMA_SERVER_URL}/slots/0?action=restore",
+                json={"filename": _KV_SLOT_SAVE_FILENAME},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                data = resp.json() if resp.content else {}
+                n_restored = data.get("n_restored", 0)
+                restore_ms = (data.get("timings") or {}).get("restore_ms", 0.0)
+                print(
+                    f"[INFO] [KV Cache Slot] メイン会話KVキャッシュを復元しました ({reason}: {n_restored} tok, {restore_ms:.1f} ms)",
+                    flush=True,
+                )
+                return True
+            else:
+                print(
+                    f"[WARN] [KV Cache Slot] restore 失敗 (HTTP {resp.status_code}, reason={reason}): {resp.text[:120]}",
+                    flush=True,
+                )
+        except Exception as e:
+            _search_logger.debug(f"[KV Cache Slot] restore スキップ ({reason}): {e}")
+            print(f"[WARN] [KV Cache Slot] restore 例外 ({reason}): {e}", flush=True)
+        return False
+
+
+def _mark_main_chat_kv_active() -> None:
+    """メイン会話推論が完了し、スロット0にメイン会話のKVキャッシュが保持されたことを記録する。"""
+    global _main_chat_has_kv, _main_chat_kv_saved
+    with _kv_slot_lock:
+        _main_chat_has_kv = True
+        _main_chat_kv_saved = False
+
+
 def _extract_and_save_fact_bg(user_text, session_id='default_session'):
     """バックグラウンドで事実抽出・保存（プロキシ用）"""
     if not user_text or not user_text.strip():
@@ -2020,6 +2142,7 @@ def _extract_and_save_fact_bg(user_text, session_id='default_session'):
             "max_tokens": 1024,
             "chat_template_kwargs": {"enable_thinking": False}
         }
+        _save_main_chat_kv_if_needed("bg_fact_extract")
         resp = _http_session.post(f"{LLAMA_SERVER_URL}/v1/chat/completions", json=payload, timeout=60)
         if resp.status_code == 200:
             result = resp.json()
@@ -2093,6 +2216,7 @@ def _decide_and_generate_search_query(user_text, recent_history=None, user_conte
 
         # 画像処理（mmproj）のエンコード時間を考慮し、画像添付時は45秒まで待機
         timeout_sec = 45 if has_img else 15
+        _save_main_chat_kv_if_needed("stage1_web_search")
         resp = _http_session.post(f"{LLAMA_SERVER_URL}/v1/chat/completions", json=payload, timeout=timeout_sec)
         if resp.status_code == 200:
             result = resp.json()
@@ -2459,9 +2583,18 @@ def proxy_chat_completions():
 
     session_id = payload.get('session_id') or request.args.get('session_id') or 'default_session'
     channel_id = payload.get('channel_id') or request.args.get('channel_id') or 'web_ui'
-    active_message_ids = payload.get('active_message_ids') or [
-        m.get('id') for m in messages if isinstance(m, dict) and m.get('id')
-    ]
+    raw_worldline_filter = payload.get('worldline_filter_enabled', True)
+    if isinstance(raw_worldline_filter, str):
+        worldline_filter_enabled = raw_worldline_filter.lower() not in ('false', '0', 'off')
+    else:
+        worldline_filter_enabled = bool(raw_worldline_filter)
+
+    if worldline_filter_enabled:
+        active_message_ids = payload.get('active_message_ids') or [
+            m.get('id') for m in messages if isinstance(m, dict) and m.get('id')
+        ]
+    else:
+        active_message_ids = None
 
     # RAG: 関連記憶の検索と注入（例外時は通常チャット推論へ安全フォールバック）
     try:
@@ -2477,6 +2610,14 @@ def proxy_chat_completions():
     is_stream = payload.get('stream', False)
 
     try:
+        # Step 1 KVキャッシュ保護 (16GB / 24GB プリセット時):
+        # 内部リクエスト（要約・事実抽出・子要素抽出）ではメイン会話のKVキャッシュを退避し、
+        # メイン会話リクエストでは（退避済みがあれば）推論直前に復元する
+        if _is_internal_request:
+            _save_main_chat_kv_if_needed("internal_summary_or_extract")
+        else:
+            _restore_main_chat_kv_if_needed("main_chat")
+
         # llama-server にプロキシ
         headers = {'Content-Type': 'application/json'}
         # 元のリクエストの認証ヘッダーがあれば転送
@@ -2510,6 +2651,8 @@ def proxy_chat_completions():
                     print(f"[WARN] SSEストリーム中継エラー: {e}")
                 finally:
                     resp.close()
+                    if not _is_internal_request and resp.status_code == 200:
+                        _mark_main_chat_kv_active()
 
             response_headers = {
                 'X-Deining-Recalled-Memories': recalled_b64,
@@ -2526,6 +2669,9 @@ def proxy_chat_completions():
                 content_type=resp.headers.get('Content-Type', 'text/event-stream')
             )
         else:
+            if not _is_internal_request and resp.status_code == 200:
+                _mark_main_chat_kv_active()
+
             response_headers = {
                 'X-Deining-Recalled-Memories': recalled_b64,
                 'Access-Control-Expose-Headers': 'X-Deining-Recalled-Memories'

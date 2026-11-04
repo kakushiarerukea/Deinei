@@ -2057,6 +2057,40 @@ class ChatStore {
 		let resolvedModel: string | null = null;
 		let modelPersisted = false;
 		const convId = assistantMessage.convId;
+
+		// TTFA (Time To First Audio) 計測用タイマー & 初回音声イベントリスナー
+		const turnStartTime = performance.now();
+		let recordedTtfaMs: number | null = null;
+		const targetAssistantMsgId = currentMessageId;
+
+		const handleFirstAudioPlayed = async () => {
+			if (recordedTtfaMs !== null) return;
+			recordedTtfaMs = Math.round(performance.now() - turnStartTime);
+			console.log(`[METRICS] TTFA: ${recordedTtfaMs} ms (msgId: ${targetAssistantMsgId})`);
+			if (typeof window !== 'undefined') {
+				window.removeEventListener('deiningFirstAudioPlayed', handleFirstAudioPlayed);
+			}
+			const idx = conversationsStore.findMessageIndex(targetAssistantMsgId);
+			if (idx !== -1) {
+				const existing = conversationsStore.activeMessages[idx];
+				const updatedTimings: ChatMessageTimings = {
+					...(existing.timings || {}),
+					ttfa_ms: recordedTtfaMs
+				};
+				conversationsStore.updateMessageAtIndex(idx, { timings: updatedTimings });
+				await DatabaseService.updateMessage(targetAssistantMsgId, { timings: updatedTimings }).catch(() => {});
+			}
+		};
+
+		if (typeof window !== 'undefined') {
+			if (typeof (window as any).resetFirstAudioPlayed === 'function') {
+				(window as any).resetFirstAudioPlayed();
+			}
+			window.addEventListener('deiningFirstAudioPlayed', handleFirstAudioPlayed);
+			setTimeout(() => {
+				window.removeEventListener('deiningFirstAudioPlayed', handleFirstAudioPlayed);
+			}, 45000);
+		}
 		// Tracks the last message created in this flow. Used as the parent for the next
 		// turn's assistant message so createAssistantMessage does not have to read
 		// conversationsStore.activeMessages, which may belong to a different conversation
@@ -2093,35 +2127,80 @@ class ChatStore {
 			});
 		};
 
-		let streamingRafId: number | null = null;
+		let streamingTimerId: ReturnType<typeof setTimeout> | null = null;
+		let lastUiUpdateTime = 0;
+		const MIN_UI_UPDATE_INTERVAL_MS = 33; // 泥濘: 30fps スロットリング (約33.3ms)。240Hz等の環境で requestAnimationFrame を空回しせず setTimeout で待機する
+		let lastTimingsUpdateTime = 0;
+		const MIN_TIMINGS_UPDATE_INTERVAL_MS = 100; // 泥濘: timings_per_token による毎トークンの CPU 割り込み・ゲージ再計算を 100ms 間隔 (10fps) に抑制
+		let latestPendingTimings: {
+			timings?: ChatMessageTimings;
+			promptProgress?: ChatMessagePromptProgress;
+		} | null = null;
+
+		const applyTimingsState = (
+			timings?: ChatMessageTimings,
+			promptProgress?: ChatMessagePromptProgress
+		) => {
+			const tokensPerSecond =
+				timings?.predicted_ms && timings?.predicted_n
+					? (timings.predicted_n / timings.predicted_ms) * 1000
+					: 0;
+			this.updateProcessingStateFromTimings(
+				{
+					prompt_n: timings?.prompt_n || 0,
+					prompt_ms: timings?.prompt_ms,
+					predicted_n: timings?.predicted_n || 0,
+					predicted_per_second: tokensPerSecond,
+					cache_n: timings?.cache_n || 0,
+					prompt_progress: promptProgress
+				},
+				convId
+			);
+		};
+
 		const flushStreamingUI = () => {
-			if (streamingRafId !== null && typeof cancelAnimationFrame === 'function') {
-				cancelAnimationFrame(streamingRafId);
-				streamingRafId = null;
+			if (streamingTimerId !== null) {
+				clearTimeout(streamingTimerId);
+				streamingTimerId = null;
 			}
+			lastUiUpdateTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
 			this.setChatStreaming(convId, streamedContent, currentMessageId, effectiveModel);
 			const idx = conversationsStore.findMessageIndex(currentMessageId);
-			conversationsStore.updateMessageAtIndex(idx, { content: streamedContent });
+			if (idx !== -1) {
+				conversationsStore.updateMessageAtIndex(idx, {
+					content: streamedContent,
+					reasoningContent: streamedReasoningContent || undefined
+				});
+			}
 		};
 
 		const updateStreamingUI = () => {
-			if (typeof requestAnimationFrame !== 'function') {
-				flushStreamingUI();
-				return;
-			}
-			if (streamingRafId !== null) return;
-			streamingRafId = requestAnimationFrame(() => {
-				streamingRafId = null;
+			if (streamingTimerId !== null) return;
+
+			const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+			const delay =
+				now - lastUiUpdateTime >= MIN_UI_UPDATE_INTERVAL_MS
+					? 0
+					: Math.ceil(MIN_UI_UPDATE_INTERVAL_MS - (now - lastUiUpdateTime));
+
+			streamingTimerId = setTimeout(() => {
+				streamingTimerId = null;
+				lastUiUpdateTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
 				this.setChatStreaming(convId, streamedContent, currentMessageId, effectiveModel);
 				const idx = conversationsStore.findMessageIndex(currentMessageId);
-				conversationsStore.updateMessageAtIndex(idx, { content: streamedContent });
-			});
+				if (idx !== -1) {
+					conversationsStore.updateMessageAtIndex(idx, {
+						content: streamedContent,
+						reasoningContent: streamedReasoningContent || undefined
+					});
+				}
+			}, delay);
 		};
 
 		const cleanupStreamingState = () => {
-			if (streamingRafId !== null && typeof cancelAnimationFrame === 'function') {
-				cancelAnimationFrame(streamingRafId);
-				streamingRafId = null;
+			if (streamingTimerId !== null) {
+				clearTimeout(streamingTimerId);
+				streamingTimerId = null;
 			}
 			this.setStreamingActive(false);
 			this.setChatLoading(convId, false);
@@ -2143,10 +2222,7 @@ class ChatStore {
 				streamedReasoningContent += chunk;
 				// mark streaming state so a stop mid-thinking can persist the partial reasoning
 				this.setChatStreaming(convId, streamedContent, currentMessageId, effectiveModel);
-				const idx = conversationsStore.findMessageIndex(currentMessageId);
-				conversationsStore.updateMessageAtIndex(idx, {
-					reasoningContent: streamedReasoningContent
-				});
+				updateStreamingUI();
 				this.setChatReasoning(convId, true);
 			},
 			onToolCallsStreaming: (toolCalls) => {
@@ -2172,21 +2248,12 @@ class ChatStore {
 				conversationsStore.updateMessageAtIndex(idx, { timings: intermediateTimings });
 			},
 			onTimings: (timings?: ChatMessageTimings, promptProgress?: ChatMessagePromptProgress) => {
-				const tokensPerSecond =
-					timings?.predicted_ms && timings?.predicted_n
-						? (timings.predicted_n / timings.predicted_ms) * 1000
-						: 0;
-				this.updateProcessingStateFromTimings(
-					{
-						prompt_n: timings?.prompt_n || 0,
-						prompt_ms: timings?.prompt_ms,
-						predicted_n: timings?.predicted_n || 0,
-						predicted_per_second: tokensPerSecond,
-						cache_n: timings?.cache_n || 0,
-						prompt_progress: promptProgress
-					},
-					convId
-				);
+				latestPendingTimings = { timings, promptProgress };
+				const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+				if (promptProgress || now - lastTimingsUpdateTime >= MIN_TIMINGS_UPDATE_INTERVAL_MS) {
+					lastTimingsUpdateTime = now;
+					applyTimingsState(timings, promptProgress);
+				}
 			},
 			onAssistantTurnComplete: async (
 				content: string,
@@ -2194,15 +2261,25 @@ class ChatStore {
 				timings: ChatMessageTimings | undefined,
 				toolCalls: import('$lib/types/api').ApiChatCompletionToolCall[] | undefined
 			) => {
-				if (streamingRafId !== null && typeof cancelAnimationFrame === 'function') {
-					cancelAnimationFrame(streamingRafId);
-					streamingRafId = null;
+				if (streamingTimerId !== null) {
+					clearTimeout(streamingTimerId);
+					streamingTimerId = null;
 				}
+				if (latestPendingTimings) {
+					applyTimingsState(latestPendingTimings.timings, latestPendingTimings.promptProgress);
+					latestPendingTimings = null;
+				}
+				const finalTimings: ChatMessageTimings | undefined = timings
+					? { ...timings, ...(recordedTtfaMs !== null ? { ttfa_ms: recordedTtfaMs } : {}) }
+					: recordedTtfaMs !== null
+						? { ttfa_ms: recordedTtfaMs }
+						: undefined;
+
 				const updateData: Record<string, unknown> = {
 					content,
 					reasoningContent: reasoningContent || undefined,
 					toolCalls: toolCalls ? JSON.stringify(toolCalls) : '',
-					timings,
+					timings: finalTimings,
 					recalledMemories: recalledMemoriesData
 				};
 				if (resolvedModel && !modelPersisted) updateData.model = resolvedModel;
@@ -2214,7 +2291,7 @@ class ChatStore {
 					toolCalls: toolCalls ? JSON.stringify(toolCalls) : '',
 					recalledMemories: recalledMemoriesData
 				};
-				if (timings) uiUpdate.timings = timings;
+				if (finalTimings) uiUpdate.timings = finalTimings;
 				if (resolvedModel) uiUpdate.model = resolvedModel;
 				// touch the active ui array and node pointer only when this conversation
 				// is displayed; otherwise persist the node move straight to the db so a
@@ -2428,12 +2505,17 @@ class ChatStore {
 				) => {
 					const content = streamedContent || finalContent || '';
 					const reasoning = streamedReasoningContent || reasoningContent;
+					const finalTimings: ChatMessageTimings | undefined = timings
+						? { ...timings, ...(recordedTtfaMs !== null ? { ttfa_ms: recordedTtfaMs } : {}) }
+						: recordedTtfaMs !== null
+							? { ttfa_ms: recordedTtfaMs }
+							: undefined;
 
 					const updateData: Record<string, unknown> = {
 						content,
 						reasoningContent: reasoning || undefined,
 						toolCalls: toolCalls || '',
-						timings,
+						timings: finalTimings,
 						recalledMemories: recalledMemoriesData
 					};
 					if (resolvedModel && !modelPersisted) updateData.model = resolvedModel;
@@ -2445,7 +2527,7 @@ class ChatStore {
 						toolCalls: toolCalls || '',
 						recalledMemories: recalledMemoriesData
 					};
-					if (timings) uiUpdate.timings = timings;
+					if (finalTimings) uiUpdate.timings = finalTimings;
 					if (resolvedModel) uiUpdate.model = resolvedModel;
 					conversationsStore.updateMessageAtIndex(idx, uiUpdate);
 					await conversationsStore.updateCurrentNode(currentMessageId);
@@ -3094,18 +3176,23 @@ class ChatStore {
 						const fullContent = originalContent + finalAppendedContent;
 						const fullReasoning = originalReasoning + finalAppendedReasoning || undefined;
 
+						const existingMsg = conversationsStore.activeMessages[conversationsStore.findMessageIndex(msg.id)];
+						const mergedTimings = timings
+							? { ...timings, ...(existingMsg?.timings?.ttfa_ms ? { ttfa_ms: existingMsg.timings.ttfa_ms } : {}) }
+							: timings;
+
 						await DatabaseService.updateMessage(msg.id, {
 							content: fullContent,
 							reasoningContent: fullReasoning,
 							timestamp: Date.now(),
-							timings
+							timings: mergedTimings
 						});
 
 						conversationsStore.updateMessageAtIndex(conversationsStore.findMessageIndex(msg.id), {
 							content: fullContent,
 							reasoningContent: fullReasoning,
 							timestamp: Date.now(),
-							timings
+							timings: mergedTimings
 						});
 
 						conversationsStore.updateConversationTimestamp();

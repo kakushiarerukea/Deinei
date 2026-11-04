@@ -264,17 +264,26 @@ export class ChatService {
 		(requestBody as any).cache_prompt = true;
 		(requestBody as any).id_slot = 0;
 
-		// 現在アクティブな世界線全体のメッセージID（Rootから最新メッセージまで）を渡すことで、
-		// バックエンドの世界線フィルタ（別ブランチ除外）を正確に機能させる
-		let activeMessageIds: string[] = [];
-		if (conversationsStore.activeMessages && conversationsStore.activeMessages.length > 0) {
-			activeMessageIds = conversationsStore.activeMessages.map((m) => m.id).filter(Boolean);
+		// 有向木世界線フィルタ（エンベッディング棲み分け）の判定
+		const savedWorldlineFilter = typeof localStorage !== 'undefined' ? localStorage.getItem('deining_worldline_filter_enabled') : null;
+		const isWorldlineFilterEnabled = savedWorldlineFilter !== null ? savedWorldlineFilter === 'true' : true;
+		(requestBody as any).worldline_filter_enabled = isWorldlineFilterEnabled;
+
+		if (isWorldlineFilterEnabled) {
+			// 現在アクティブな世界線全体のメッセージID（Rootから最新メッセージまで）を渡すことで、
+			// バックエンドの世界線フィルタ（別ブランチ除外）を正確に機能させる
+			let activeMessageIds: string[] = [];
+			if (conversationsStore.activeMessages && conversationsStore.activeMessages.length > 0) {
+				activeMessageIds = conversationsStore.activeMessages.map((m) => m.id).filter(Boolean);
+			} else {
+				activeMessageIds = messages
+					.map((m) => ('id' in m ? (m as any).id : null))
+					.filter(Boolean);
+				}
+			(requestBody as any).active_message_ids = activeMessageIds;
 		} else {
-			activeMessageIds = messages
-				.map((m) => ('id' in m ? (m as any).id : null))
-				.filter(Boolean);
+			(requestBody as any).active_message_ids = null;
 		}
-		(requestBody as any).active_message_ids = activeMessageIds;
 		if (conversationId) {
 			(requestBody as any).session_id = conversationId;
 		}
