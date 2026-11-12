@@ -522,14 +522,14 @@ export function startAnimationLoop() {
 	if (animFrameId !== null) return;
 	lastTime = performance.now();
 	let lastRenderTime = 0;
-	const VRM_TARGET_FRAME_INTERVAL_MS = 1000.0 / 60.0; // 泥濘: 240Hz等の高リフレッシュレート環境でのGPU競合を防ぐ 30fps スロットリング (約33.3ms)
+	const VRM_TARGET_FRAME_INTERVAL_MS = 1000.0 / 60.0; // 泥濘: 240Hz等の高リフレッシュレート環境でのGPU競合を低減する 60fps スロットリング (約16.6ms)
 
 	const renderLoop = (time: number) => {
 		animFrameId = requestAnimationFrame(renderLoop);
 
 		if (!isVisible || !renderer || !scene || !camera) return;
 
-		// 泥濘: 30fps (約33.3ms) 未満の間隔では Three.js の WebGL レンダリングおよびボーン更新をスキップ
+		// 泥濘: 60fps (約16.6ms) 未満の間隔では Three.js の WebGL レンダリングおよびボーン更新をスキップ
 		if (lastRenderTime > 0 && time - lastRenderTime < VRM_TARGET_FRAME_INTERVAL_MS) {
 			return;
 		}

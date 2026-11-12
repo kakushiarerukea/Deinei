@@ -2009,6 +2009,7 @@ def _do_web_search(query_text, session_id='default_session'):
 
 # ====== Step 1 KVキャッシュ保護 (16GB / 24GB プリセット限定) ======
 _kv_slot_lock = threading.Lock()
+_precache_lock = threading.Lock()
 _main_chat_has_kv = False
 _main_chat_kv_saved = False
 _KV_SLOT_SAVE_FILENAME = "main_chat.bin"
@@ -2107,6 +2108,18 @@ def _restore_main_chat_kv_if_needed(reason: str = "main_chat") -> bool:
             _search_logger.debug(f"[KV Cache Slot] restore スキップ ({reason}): {e}")
             print(f"[WARN] [KV Cache Slot] restore 例外 ({reason}): {e}", flush=True)
         return False
+
+
+def _discard_saved_main_chat_kv(reason: str = "post_summary_precache") -> None:
+    """要約完了後の先行Prefill等で、要約前に退避された古いKVキャッシュ退避フラグを破棄する。"""
+    global _main_chat_kv_saved
+    with _kv_slot_lock:
+        if _main_chat_kv_saved:
+            _main_chat_kv_saved = False
+            print(
+                f"[INFO] [KV Cache Slot] 古い退避済みKVキャッシュフラグを破棄しました ({reason})",
+                flush=True,
+            )
 
 
 def _mark_main_chat_kv_active() -> None:
@@ -2216,8 +2229,9 @@ def _decide_and_generate_search_query(user_text, recent_history=None, user_conte
 
         # 画像処理（mmproj）のエンコード時間を考慮し、画像添付時は45秒まで待機
         timeout_sec = 45 if has_img else 15
-        _save_main_chat_kv_if_needed("stage1_web_search")
-        resp = _http_session.post(f"{LLAMA_SERVER_URL}/v1/chat/completions", json=payload, timeout=timeout_sec)
+        with _precache_lock:
+            _save_main_chat_kv_if_needed("stage1_web_search")
+            resp = _http_session.post(f"{LLAMA_SERVER_URL}/v1/chat/completions", json=payload, timeout=timeout_sec)
         if resp.status_code == 200:
             result = resp.json()
             msg_obj = result.get('choices', [{}])[0].get('message', {})
@@ -2293,7 +2307,50 @@ _LAST_REQUEST_MESSAGES_BY_SESSION = {}
 _LAST_REQUEST_LOCK = threading.Lock()
 _LAST_REQUEST_MAX_SESSIONS = 32
 
-def _debug_log_token_cache_diff(current_messages, session_id='default_session'):
+def _is_precache_placeholder_messages(messages_list: list) -> bool:
+    if not messages_list or not isinstance(messages_list[-1], dict):
+        return False
+    last_msg = messages_list[-1]
+    return last_msg.get('role') == 'user' and (last_msg.get('content') or '') == ''
+
+def _ensure_precache_trailing_user_placeholder(messages_list: list) -> list:
+    """llama-server (b9873) の oaicompat_chat_params_parse は末尾が assistant の場合に
+    continue_final_message=AUTO を強制適用し、Gemma 4 の common_chat_params_init_gemma4 で
+    末尾 assistant メッセージ先頭に <|channel>thought\n<channel|> (4トークン) を混入させ、
+    かつ末尾の <turn|>\n を省略する。次ターン本推論時の Jinja 履歴ループ出力と 1 トークン単位で
+    一致させるため、先読み Prefill 時は末尾に空の user プレースホルダを付加する。
+    """
+    if not messages_list:
+        return messages_list
+    normalized = list(messages_list)
+    last_msg = normalized[-1] if isinstance(normalized[-1], dict) else {}
+    if last_msg.get('role') != 'user':
+        normalized.append({'role': 'user', 'content': ''})
+    return normalized
+
+def _strip_trailing_generation_prompt(prompt_text: str, messages_list: list) -> str:
+    """先読みPrefill時、/apply-template が自動付与する末尾の生成開始プロンプトを除去し、
+    実際の Prefill 対象トークン列 (<|turn>user\n まで) に揃える。
+    """
+    if not prompt_text or not messages_list:
+        return prompt_text
+    if _is_precache_placeholder_messages(messages_list):
+        for suffix in (
+            '<turn|>\n<|turn>model\n<|channel>thought\n<channel|>',
+            '<turn|>\n<|turn>model\n',
+        ):
+            if prompt_text.endswith(suffix):
+                return prompt_text[:-len(suffix)]
+        return prompt_text
+    last_role = messages_list[-1].get('role') if isinstance(messages_list[-1], dict) else None
+    if last_role != 'assistant':
+        return prompt_text
+    for suffix in ('<|turn>model\n<|channel>thought\n<channel|>', '<|turn>model\n'):
+        if prompt_text.endswith(suffix):
+            return prompt_text[:-len(suffix)]
+    return prompt_text
+
+def _debug_log_token_cache_diff(current_messages, session_id='default_session', is_precache=False):
     """トークン共通プレフィックス比較デバッグ。
     前回リクエストと今回リクエストのトークン列をセッション単位で比較し、KVキャッシュ再利用率と食い違い位置をログに出力する。
     """
@@ -2307,6 +2364,8 @@ def _debug_log_token_cache_diff(current_messages, session_id='default_session'):
                 'role': m['role'],
                 'content': m.get('content', '')
             })
+    if is_precache:
+        clean_current = _ensure_precache_trailing_user_placeholder(clean_current)
 
     sid_key = str(session_id or 'default_session')
     with _LAST_REQUEST_LOCK:
@@ -2320,7 +2379,7 @@ def _debug_log_token_cache_diff(current_messages, session_id='default_session'):
     if not prev_messages:
         try:
             r = _http_session.post(f"{LLAMA_SERVER_URL}/apply-template", json={"messages": clean_current}, timeout=3)
-            prompt = r.json().get("prompt", "")
+            prompt = _strip_trailing_generation_prompt(r.json().get("prompt", ""), clean_current)
             r2 = _http_session.post(f"{LLAMA_SERVER_URL}/tokenize", json={"content": prompt, "parse_special": True}, timeout=3)
             tokens = r2.json().get("tokens", [])
             print(f"[INFO] [Token Cache Debug] 初回ターン 総トークン数: {len(tokens)} (session={sid_key})")
@@ -2330,11 +2389,11 @@ def _debug_log_token_cache_diff(current_messages, session_id='default_session'):
 
     try:
         r_prev = _http_session.post(f"{LLAMA_SERVER_URL}/apply-template", json={"messages": prev_messages}, timeout=3)
-        prompt_prev = r_prev.json().get("prompt", "")
+        prompt_prev = _strip_trailing_generation_prompt(r_prev.json().get("prompt", ""), prev_messages)
         tok_prev = _http_session.post(f"{LLAMA_SERVER_URL}/tokenize", json={"content": prompt_prev, "parse_special": True}, timeout=3).json().get("tokens", [])
 
         r_curr = _http_session.post(f"{LLAMA_SERVER_URL}/apply-template", json={"messages": clean_current}, timeout=3)
-        prompt_curr = r_curr.json().get("prompt", "")
+        prompt_curr = _strip_trailing_generation_prompt(r_curr.json().get("prompt", ""), clean_current)
         tok_curr = _http_session.post(f"{LLAMA_SERVER_URL}/tokenize", json={"content": prompt_curr, "parse_special": True}, timeout=3).json().get("tokens", [])
 
         n = 0
@@ -2359,7 +2418,7 @@ def _debug_log_token_cache_diff(current_messages, session_id='default_session'):
     except Exception as e:
         print(f"[Token Cache Debug] 比較エラー（無視可能）: {e}")
 
-def _enrich_messages_with_rag(payload, messages, user_text, raw_user_content, session_id, channel_id, active_message_ids, _is_internal_request):
+def _enrich_messages_with_rag(payload, messages, user_text, raw_user_content, session_id, channel_id, active_message_ids, _is_internal_request, run_token_debug=True):
     """RAG記憶検索・Web検索・コンテキスト情報を安全に注入する"""
     fact_memories = []
     episode_memories = []
@@ -2532,7 +2591,7 @@ def _enrich_messages_with_rag(payload, messages, user_text, raw_user_content, se
         payload['messages'] = messages
 
     # デバッグ: トークン共通プレフィックス比較（Claude提案ロジック）
-    if not _is_internal_request:
+    if run_token_debug and not _is_internal_request:
         _debug_log_token_cache_diff(messages, session_id=session_id)
 
     return fact_memories, episode_memories, web_recalled_results, context_text
@@ -2596,41 +2655,82 @@ def proxy_chat_completions():
     else:
         active_message_ids = None
 
-    # RAG: 関連記憶の検索と注入（例外時は通常チャット推論へ安全フォールバック）
-    try:
-        fact_memories, episode_memories, web_recalled_results, context_text = _enrich_messages_with_rag(
-            payload, messages, user_text, raw_user_content, session_id, channel_id, active_message_ids, _is_internal_request
-        )
-    except Exception as e:
-        print(f"[WARN] RAG想起・前処理エラー（通常チャット推論にフォールバックします）: {e}", flush=True)
-        import traceback
-        traceback.print_exc()
+    # 非同期KVキャッシュ先読み (Background Pre-caching) 判定
+    is_precache = bool(
+        payload.pop('is_precache', False)
+        or payload.get('n_predict') == 0
+        or payload.get('max_tokens') == 0
+    )
+    force_clear_saved_kv = bool(payload.pop('force_clear_saved_kv', False))
+
+    if is_precache:
+        # 先行Prefill時は動的RAGや現在日時を注入せず、確定済みの会話履歴のみを評価する
         fact_memories, episode_memories, web_recalled_results, context_text = [], [], [], ""
+    else:
+        # RAG: 関連記憶の検索と注入（例外時は通常チャット推論へ安全フォールバック）
+        try:
+            fact_memories, episode_memories, web_recalled_results, context_text = _enrich_messages_with_rag(
+                payload, messages, user_text, raw_user_content, session_id, channel_id, active_message_ids, _is_internal_request, run_token_debug=False
+            )
+        except Exception as e:
+            print(f"[WARN] RAG想起・前処理エラー（通常チャット推論にフォールバックします）: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            fact_memories, episode_memories, web_recalled_results, context_text = [], [], [], ""
 
     is_stream = payload.get('stream', False)
 
     try:
-        # Step 1 KVキャッシュ保護 (16GB / 24GB プリセット時):
-        # 内部リクエスト（要約・事実抽出・子要素抽出）ではメイン会話のKVキャッシュを退避し、
-        # メイン会話リクエストでは（退避済みがあれば）推論直前に復元する
-        if _is_internal_request:
-            _save_main_chat_kv_if_needed("internal_summary_or_extract")
-        else:
-            _restore_main_chat_kv_if_needed("main_chat")
-
-        # llama-server にプロキシ
         headers = {'Content-Type': 'application/json'}
         # 元のリクエストの認証ヘッダーがあれば転送
         if request.headers.get('Authorization'):
             headers['Authorization'] = request.headers['Authorization']
 
-        resp = _http_session.post(
-            f"{LLAMA_SERVER_URL}/v1/chat/completions",
-            json=payload,
-            headers=headers,
-            stream=is_stream,
-            timeout=300
-        )
+        if is_precache:
+            messages = _ensure_precache_trailing_user_placeholder(messages)
+            payload['messages'] = messages
+            payload['add_generation_prompt'] = False
+            with _precache_lock:
+                if not _is_internal_request:
+                    _debug_log_token_cache_diff(messages, session_id=session_id, is_precache=True)
+                if force_clear_saved_kv:
+                    _discard_saved_main_chat_kv("post_summary_precache")
+                elif not _is_internal_request:
+                    _restore_main_chat_kv_if_needed("precache")
+
+                t0_pre = time.time()
+                resp = _http_session.post(
+                    f"{LLAMA_SERVER_URL}/v1/chat/completions",
+                    json=payload,
+                    headers=headers,
+                    stream=False,
+                    timeout=300
+                )
+                elapsed_pre_ms = (time.time() - t0_pre) * 1000.0
+                if not _is_internal_request and resp.status_code == 200:
+                    _mark_main_chat_kv_active()
+                    print(
+                        f"[OK] [KV Pre-cache] バックグラウンド先行Prefill完了 (session={session_id}, {elapsed_pre_ms:.1f} ms, after_summary={force_clear_saved_kv})",
+                        flush=True
+                    )
+        else:
+            # Step 1 KVキャッシュ保護 (16GB / 24GB プリセット時):
+            # 先行Prefill実行中の場合は完了を待機してからKVスロット操作・トークン比較を行い、推論へ安全に引き継ぐ
+            with _precache_lock:
+                if not _is_internal_request:
+                    _debug_log_token_cache_diff(messages, session_id=session_id)
+                if _is_internal_request:
+                    _save_main_chat_kv_if_needed("internal_summary_or_extract")
+                else:
+                    _restore_main_chat_kv_if_needed("main_chat")
+
+            resp = _http_session.post(
+                f"{LLAMA_SERVER_URL}/v1/chat/completions",
+                json=payload,
+                headers=headers,
+                stream=is_stream,
+                timeout=300
+            )
 
         recalled_data = {
             "facts": fact_memories if 'fact_memories' in locals() else [],

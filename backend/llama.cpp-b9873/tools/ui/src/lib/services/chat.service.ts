@@ -679,7 +679,14 @@ export class ChatService {
 		messages: ApiChatMessageData[] | (DatabaseMessage & { extra?: DatabaseMessageExtra[] })[],
 		model?: string | null,
 		excludeReasoning?: boolean,
-		signal?: AbortSignal
+		signal?: AbortSignal,
+		options?: {
+			conversationId?: string;
+			enableThinking?: boolean;
+			disableReasoningParsing?: boolean;
+			tools?: unknown[];
+			forceClearSavedKv?: boolean;
+		}
 	): Promise<void> {
 		const normalizedMessages: ApiChatMessageData[] = (
 			await Promise.all(
@@ -703,24 +710,77 @@ export class ChatService {
 			return true;
 		});
 
-		const requestBody: Record<string, unknown> = {
-			messages: normalizedMessages.map((msg: ApiChatMessageData) => {
-				const mapped: Record<string, unknown> = {
-					role: msg.role,
-					content: excludeReasoning ? ChatService.stripReasoningContent(msg.content) : msg.content,
-					tool_calls: msg.tool_calls,
-					tool_call_id: msg.tool_call_id
-				};
+		// Filter out image attachments if the model doesn't support vision (sendMessageと同一条件に揃える)
+		if (model && !modelsStore.modelSupportsVision(model)) {
+			normalizedMessages.forEach((msg) => {
+				if (Array.isArray(msg.content)) {
+					msg.content = msg.content.filter((part: ApiChatMessageContentPart) => {
+						if (part.type === ContentPartType.IMAGE_URL) {
+							return false;
+						}
 
-				if (!excludeReasoning && msg.reasoning_content) {
-					mapped.reasoning_content = msg.reasoning_content;
+						return true;
+					});
+					if (
+						msg.content.length === 1 &&
+						msg.content[0].type === ContentPartType.TEXT &&
+						typeof msg.content[0].text === 'string'
+					) {
+						msg.content = msg.content[0].text;
+					}
 				}
+			});
+		}
 
-				return mapped;
-			}),
+		const mappedMessages = normalizedMessages.map((msg: ApiChatMessageData) => {
+			const mapped: Record<string, unknown> = {
+				role: msg.role,
+				content: msg.content,
+				tool_calls: msg.tool_calls,
+				tool_call_id: msg.tool_call_id
+			};
+
+			if (!excludeReasoning && msg.reasoning_content) {
+				mapped.reasoning_content = msg.reasoning_content;
+			}
+
+			return mapped;
+		});
+
+		if (
+			mappedMessages.length > 0 &&
+			mappedMessages[mappedMessages.length - 1].role !== MessageRole.USER
+		) {
+			mappedMessages.push({
+				role: MessageRole.USER,
+				content: ''
+			});
+		}
+
+		const requestBody: Record<string, unknown> = {
+			messages: mappedMessages,
 			stream: false,
-			n_predict: 0
+			n_predict: 0,
+			cache_prompt: true,
+			id_slot: 0,
+			add_generation_prompt: false,
+			is_precache: true,
+			force_clear_saved_kv: Boolean(options?.forceClearSavedKv),
+			reasoning_format: options?.disableReasoningParsing
+				? ReasoningFormat.NONE
+				: ReasoningFormat.AUTO,
+			chat_template_kwargs: {
+				enable_thinking: options?.enableThinking
+			}
 		};
+
+		if (options?.tools && options.tools.length > 0) {
+			requestBody.tools = options.tools;
+		}
+
+		if (options?.conversationId) {
+			requestBody.session_id = options.conversationId;
+		}
 
 		if (model) {
 			requestBody.model = model;

@@ -13,7 +13,7 @@
 	import { copyToClipboard, deriveAgenticSections, modelLoadProgressText } from '$lib/utils';
 	import { AgenticSectionType } from '$lib/enums';
 	import { REASONING_TAGS } from '$lib/constants/agentic';
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import { MessageRole, ChatMessageStatsView } from '$lib/enums';
 	import { config } from '$lib/stores/settings.svelte';
@@ -535,6 +535,28 @@
 		}
 	});
 
+	let hasDispatchedTtsSynthesisComplete = false;
+	let synthesisPipelineId = 0;
+
+	function notifyTtsSynthesisAllComplete(reason: string = 'completed') {
+		if (hasDispatchedTtsSynthesisComplete || isAborted) return;
+		hasDispatchedTtsSynthesisComplete = true;
+		console.log(`[INFO] [TTS Synthesis Complete] All TTS segments synthesized (reason=${reason}, msgId=${message.id})`);
+		if (typeof window !== 'undefined') {
+			(window as any).__lastTtsSynthesizedMessageId = message.id;
+			(window as any).__lastTtsSynthesizedReason = reason;
+			window.dispatchEvent(
+				new CustomEvent('deiningTtsSynthesisAllComplete', {
+					detail: {
+						messageId: message.id,
+						convId: message.convId,
+						reason
+					}
+				})
+			);
+		}
+	}
+
 	function startAudioSequence(enableSyncDisplay: boolean = false) {
 		if (isAborted) return;
 		if (naturalAdvanceTimer) {
@@ -543,32 +565,46 @@
 		}
 		sequenceId += 1;
 		const currentSeq = sequenceId;
+		synthesisPipelineId += 1;
+		const currentSynthesisId = synthesisPipelineId;
 		isAudioSequenceActive = true;
 		if (segments.length === 0) {
 			isAudioSequenceActive = false;
+			notifyTtsSynthesisAllComplete('empty_segments');
 			return;
 		}
 		isSyncDisplayActive = enableSyncDisplay;
 		isSyncWaiting = false;
 
 		// 最初の発話セグメント（isSpeech: true）を探索
-		const firstSpeechIdx = segments.findIndex((s) => s.isSpeech);
+		const firstSpeechIdx = segments.findIndex((s) => s.isSpeech && Boolean(s.speakableText));
 
 		if (firstSpeechIdx === -1) {
 			// セリフが1つもない（すべてト書き等）場合：全セグメントを表示してシーケンス完了
 			currentSegmentIndex = segments.length - 1;
 			isAudioSequenceActive = false;
 			isSyncDisplayActive = false;
+			notifyTtsSynthesisAllComplete('no_speech_segments');
 			return;
+		}
+
+		// 前ターンの残存プリフェッチ・音声キューをクリアしてから新規シーケンスを開始
+		ttsStore.stop(true);
+		if (typeof window !== 'undefined' && typeof (window as any).stopTTS === 'function') {
+			(window as any).stopTTS(true);
 		}
 
 		// 最初のセリフまで進め、手前のト書き（連続ト書き含む）も同時にアンロックして再生
 		currentSegmentIndex = firstSpeechIdx;
-		playSegmentAt(firstSpeechIdx, currentSeq);
+		const firstPlayPromise = playSegmentAt(firstSpeechIdx, currentSeq);
+
+		// 再生位置の移動（次へスキップ等）とは独立して、全セリフ文節のバックグラウンド合成パイプラインを1回だけ起動
+		void prefetchUpcomingSegments(firstSpeechIdx + 1, currentSynthesisId, firstPlayPromise);
 	}
 
 	function stopAudioSequence() {
 		sequenceId += 1;
+		synthesisPipelineId += 1;
 		isSyncWaiting = false;
 		if (naturalAdvanceTimer) {
 			clearTimeout(naturalAdvanceTimer);
@@ -586,26 +622,59 @@
 		if (typeof window !== 'undefined' && typeof (window as any).stopTTS === 'function') {
 			(window as any).stopTTS(true);
 		}
+		if (!isAborted) {
+			notifyTtsSynthesisAllComplete('audio_sequence_stopped');
+		}
 	}
 
 	// 後続のセリフ文節を順次バックグラウンドで先読み生成するパイプライン
-	async function prefetchUpcomingSegments(startIndex: number, targetSeq: number) {
-		if (isAborted || typeof window === 'undefined' || typeof (window as any).prefetchTTS !== 'function') return;
+	// ※「次へ」ボタンによる sequenceId の変化や再生終了による isAudioSequenceActive=false に邪魔されず、
+	// 最後のセリフのWAV合成が完了した瞬間に notifyTtsSynthesisAllComplete を確実に発火する
+	async function prefetchUpcomingSegments(
+		startIndex: number,
+		targetPipelineId: number,
+		currentPlayPromise?: Promise<unknown> | null
+	) {
+		if (isAborted || typeof window === 'undefined') return;
+		const upcomingItems = segments
+			.slice(startIndex)
+			.map((seg, offset) => ({ index: startIndex + offset, seg }))
+			.filter((item) => item.seg && item.seg.isSpeech && item.seg.speakableText);
 
-		for (let i = startIndex; i < segments.length; i++) {
-			if (isAborted || !isAudioSequenceActive || targetSeq !== sequenceId) break;
-			const upcomingSeg = segments[i];
-			if (upcomingSeg && upcomingSeg.isSpeech && upcomingSeg.speakableText) {
-				// 順次先読みリクエスト（裏で先行生成し、終わったらさらに次を先読み）
-				await (window as any).prefetchTTS(upcomingSeg.speakableText);
+		try {
+			if (currentPlayPromise && typeof currentPlayPromise.then === 'function') {
+				await currentPlayPromise;
+			}
+			if (isAborted || targetPipelineId !== synthesisPipelineId || hasDispatchedTtsSynthesisComplete) {
+				return;
+			}
+			if (typeof (window as any).prefetchTTS === 'function') {
+				for (const item of upcomingItems) {
+					if (isAborted || targetPipelineId !== synthesisPipelineId || hasDispatchedTtsSynthesisComplete) {
+						return;
+					}
+					// 既に「次へ」スキップ等で再生済み・現在再生中のセグメントは重複合成をスキップ
+					if (item.index <= currentSegmentIndex) {
+						continue;
+					}
+					await (window as any).prefetchTTS(item.seg.speakableText);
+				}
+			}
+			if (!isAborted && targetPipelineId === synthesisPipelineId) {
+				notifyTtsSynthesisAllComplete('all_segments_synthesized');
+			}
+		} catch (err) {
+			console.warn('[WARN] [TTS Prefetch] Error in prefetchUpcomingSegments:', err);
+			if (!isAborted && targetPipelineId === synthesisPipelineId) {
+				notifyTtsSynthesisAllComplete('prefetch_error');
 			}
 		}
 	}
 
-	function playSegmentAt(index: number, targetSeq: number) {
-		if (isAborted || !isAudioSequenceActive || targetSeq !== sequenceId) return;
+	function playSegmentAt(index: number, targetSeq: number): Promise<unknown> | null {
+		if (isAborted || !isAudioSequenceActive || targetSeq !== sequenceId) return null;
 		const seg = segments[index];
-		if (!seg) return;
+		if (!seg) return null;
 
 		if (naturalAdvanceTimer) {
 			clearTimeout(naturalAdvanceTimer);
@@ -614,15 +683,33 @@
 
 		if (seg.isSpeech) {
 			isSyncWaiting = true;
+			let playPromise: Promise<unknown> | null = null;
 			if (typeof window !== 'undefined' && typeof (window as any).playTTS === 'function') {
-				(window as any).playTTS(seg.speakableText, true, seg.rawText);
+				playPromise = (window as any).playTTS(seg.speakableText, true, seg.rawText);
 			}
-			// ⚡ 先読みパイプライン起動：再生中に次の文節以降を裏でどんどん先行合成！
-			prefetchUpcomingSegments(index + 1, targetSeq);
+			// このセグメントが末尾の発話セグメントである場合、そのWAV合成完了時にも完了通知を担保する
+			const hasLaterSpeech = segments
+				.slice(index + 1)
+				.some((s) => s && s.isSpeech && Boolean(s.speakableText));
+			if (!hasLaterSpeech && playPromise && typeof playPromise.then === 'function') {
+				playPromise
+					.then(() => {
+						if (!isAborted) {
+							notifyTtsSynthesisAllComplete('last_segment_synthesized');
+						}
+					})
+					.catch(() => {
+						if (!isAborted) {
+							notifyTtsSynthesisAllComplete('last_segment_error');
+						}
+					});
+			}
+			return playPromise;
 		} else {
 			// 万一非発話セグメントが直接渡された場合でも、停止せず次のセリフへ自動進行する安全ネット
 			isSyncWaiting = false;
 			advanceToNextSegment(targetSeq);
+			return null;
 		}
 	}
 
@@ -637,7 +724,7 @@
 		// 現在位置より後ろにある、次の発話セグメント（isSpeech: true）を探索
 		let nextSpeechIdx = -1;
 		for (let i = currentSegmentIndex + 1; i < segments.length; i++) {
-			if (segments[i].isSpeech) {
+			if (segments[i].isSpeech && segments[i].speakableText) {
 				nextSpeechIdx = i;
 				break;
 			}
@@ -649,29 +736,39 @@
 			playSegmentAt(nextSpeechIdx, targetSeq);
 		} else {
 			// 後続にセリフがない（末尾までト書きのみ、または末尾に到達）：
-			// 残りのト書きをすべて表示し、音声シーケンスを正常終了
+			// 残りのト書きをすべて表示し、音声シーケンスを正常終了して未発火ならKV先読みを即時トリガー
 			currentSegmentIndex = segments.length - 1;
 			isAudioSequenceActive = false;
 			isSyncDisplayActive = false;
 			isSyncWaiting = false;
+			synthesisPipelineId += 1;
+			if (!isAborted) {
+				notifyTtsSynthesisAllComplete('sequence_reached_end');
+			}
 		}
 	}
 
 	// ストリーミング状態の監視：ストリーミング中 -> 完了した瞬間に順次音声シーケンスをトリガー
 	$effect(() => {
 		const streaming = isStreaming;
-		if (streaming && isLastAssistantMessage) {
+		const lastAsst = isLastAssistantMessage;
+		if (streaming && lastAsst) {
 			wasStreaming = true;
 			localAborted = false;
-		} else if (wasStreaming && !streaming && isLastAssistantMessage) {
+			hasDispatchedTtsSynthesisComplete = false;
+		} else if (wasStreaming && !streaming && lastAsst) {
 			wasStreaming = false;
-			// ⚡ 中断（強制終了）時はTTSの読み上げを絶対に発火させない
-			if (isAborted) return;
-			const isTtsEnabled = typeof window !== 'undefined' && localStorage.getItem('deining_tts_enabled') === 'true';
-			if (isTtsEnabled && segments.length > 0) {
-				const isSyncDisplay = typeof window !== 'undefined' && localStorage.getItem('deining_tts_sync_display') === 'true';
-				startAudioSequence(isSyncDisplay);
-			}
+			untrack(() => {
+				// 中断（強制終了）時はTTSの読み上げを発火させない
+				if (isAborted) return;
+				const isTtsEnabled = typeof window !== 'undefined' && localStorage.getItem('deining_tts_enabled') === 'true';
+				if (isTtsEnabled && segments.length > 0) {
+					const isSyncDisplay = typeof window !== 'undefined' && localStorage.getItem('deining_tts_sync_display') === 'true';
+					startAudioSequence(isSyncDisplay);
+				} else {
+					notifyTtsSynthesisAllComplete('tts_disabled_or_empty');
+				}
+			});
 		}
 	});
 

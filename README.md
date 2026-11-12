@@ -23,7 +23,7 @@
     <a href="https://developer.nvidia.com/cuda-zone"><img src="https://img.shields.io/badge/CUDA-13.3%20Supported-76B900?style=flat-square&logo=nvidia" alt="CUDA"></a>
     <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3.10%20(uv)-3776AB?style=flat-square&logo=python" alt="Python"></a>
     <a href="https://svelte.dev"><img src="https://img.shields.io/badge/Frontend-Svelte%205%20%2B%20Tailwind-FF3E00?style=flat-square&logo=svelte" alt="Frontend"></a>
-    <a href="tests/"><img src="https://img.shields.io/badge/Tests-94%20Passed-3fb950?style=flat-square&logo=pytest" alt="Tests"></a>
+    <a href="tests/"><img src="https://img.shields.io/badge/Tests-105%20Passed-3fb950?style=flat-square&logo=pytest" alt="Tests"></a>
   </p>
 
   <!-- 仕様書ナビゲーション (docs/) -->
@@ -56,7 +56,7 @@
 
 | [長期記憶・RAG] 親子リトリーバル | [アバター] Live2D ＆ VRM 3D |
 | :--- | :--- |
-| ・**16ブロック忘却スライディング**: 30件蓄積で約300〜500トークンへ自動圧縮<br>・**親子リトリーバル (ChromaDB)**: `ruri-v3-310m` による高精度Fact/Episode二層検索<br>・**有向木世界線分離**: ブランチ巻き戻し・編集時も記憶の汚染を防止<br>・**相対時間タグ動的付与**: `[たった今]`, `[3日前]` などを推論時に付与 | ・**VRM 3D 描画 (Three.js + three-vrm)**: 自然な呼吸・指の脱力カーブ・視線追従<br>・**Live2D Cubism 3/4**: 画面比率に応じた自動スケール＆GUI当たり判定<br>・**直感的な配置**: `.vrm` ファイルや推奨ZIPをドラッグ＆ドロップで即座に認識<br>・<a href="docs/avatar-and-audio.md#実演デモ動画-なでなでインタラクション表情変化"><b>実演動画: なでなでインタラクション (MP4)</b></a> |
+| ・**16ブロック忘却スライディング**: 30件蓄積で約300〜500トークンへ自動圧縮<br>・**親子リトリーバル (ChromaDB)**: `ruri-v3-310m` による高精度Fact/Episode二層検索<br>・**有向木世界線分離**: ブランチ巻き戻し・編集時も記憶の汚染を防止（Debugパネルでオンオフ切替可能）<br>・**相対時間タグ動的付与**: `[たった今]`, `[3日前]` などを推論時に付与 | ・**VRM 3D 描画 (Three.js + three-vrm)**: 自然な呼吸・指の脱力カーブ・視線追従<br>・**Live2D Cubism 3/4**: 画面比率に応じた自動スケール＆GUI当たり判定<br>・**直感的な配置**: `.vrm` ファイルや推奨ZIPをドラッグ＆ドロップで即座に認識<br>・<a href="docs/avatar-and-audio.md#実演デモ動画-なでなでインタラクション表情変化"><b>実演動画: なでなでインタラクション (MP4)</b></a> |
 
 | [音声合成] 高品質TTS ＆ 口パク同期 | [プライバシー] ローカル完結 ＆ セキュア通信 |
 | :--- | :--- |
@@ -126,7 +126,7 @@
 flowchart TD
     subgraph Client ["1. クライアント・プレゼンテーション層 (WebUI & Dual Avatar)"]
         direction TB
-        BrowserUI["WebUI (Svelte 5 & Tailwind CSS)<br>2ペイン対話画面 / コンテキスト内訳ゲージ (6セグメント)"]
+        BrowserUI["WebUI (Svelte 5 & Tailwind CSS)<br>2ペイン対話画面 / コンテキスト内訳ゲージ (6セグメント) / 多言語 (日・英)"]
         TreeDB[("IndexedDB: LlamaUi<br>有向木会話履歴 / 要約スナップショット不変保持")]
         VRM["VRM 3D Engine (Three.js + three-vrm)<br>手続き的呼吸・脱力ポーズ・指カーブ・head視線追従"]
         Live2D["Live2D Engine (PixiJS 7.x)<br>Cubism 4 WebGL / 自動スケール / GUI TouchZones"]
@@ -154,10 +154,10 @@ flowchart TD
         subgraph DeineiServer ["Deinei Backend Server (server.py / Port 5000)"]
             direction TB
             Slide["16ブロック忘却スライディング<br>未要約30件/7,000tokで要約圧縮 -> 最古2ブロック退避"]
-            ParentChild["親子リトリーバル (Parent-Child RAG)<br>Dual-Query (Fact 0.865 / Episode 0.85)<br>Top-6厳選 & 最大1,200文字局所注入"]
-            Worldline["有向木世界線分離 (active_message_ids)<br>別ブランチ記憶の遮断フィルタ"]
+            ParentChild["親子リトリーバル (Parent-Child RAG)<br>Dual-Query (Fact 0.865 / Episode 0.85)<br>Top-6厳選 & 最大1,200文字局所注入 (1件最大650文字)"]
+            Worldline["有向木世界線分離 (active_message_ids)<br>別ブランチ記憶遮断 (Debugパネルで切替可能)"]
             RelativeTime["相対時間プロキシ (ISO差分計算)<br>[たった今], [3日前] 等を動的付与"]
-            WebSearch["自律Web検索パイプライン<br>正規表現ゲート -> Stage 1 LLM -> Stage 2 DDGS/Open-Meteo<br>1時間インメモリキャッシュ"]
+            WebSearch["自律Web検索パイプライン<br>正規表現ゲート -> Stage 1 LLM -> Stage 2 DDGS/Open-Meteo<br>1時間インメモリキャッシュ / 5時間即席リトリーバル"]
             STTEngine["STT 音声認識 (ReazonSpeech-K2)<br>CPU推論・オンデマンド遅延ロード"]
             ChromaDB[("ChromaDB ベクトルDB<br>埋め込み: ruri-v3-310m")]
         end
@@ -184,7 +184,7 @@ flowchart TD
 
     Slide -->|"超過ブロック退避"| ChromaDB
     ParentChild <-->|"コサイン類似度検索"| ChromaDB
-    Worldline -. "世界線遮断" .-> ParentChild
+    Worldline -. "世界線遮断フィルタ (ON/OFF切替)" .-> ParentChild
     RelativeTime -->|"動的タグ付与"| Inference
     ParentChild -->|"ユーザー発言直前へ局所注入"| Inference
     WebSearch -->|"検索・気象データ注入"| Inference
@@ -200,23 +200,24 @@ flowchart TD
 ### 各レイヤーの技術設計とデータフロー
 
 - **1. プレゼンテーション層 (WebUI & Dual Avatar)**:
-  - **有向木会話ステート (Tree State)**: 会話履歴を有向木構造として IndexedDB（`LlamaUi`）に保持。不変スナップショットと `reconcileSummarySnapshot` により、ブランチ切り替えや過去発言の編集・巻き戻し時にも要約文脈を復元。
-  - **デュアルアバターレンダリング**: VRM 3D（自然な呼吸・指の脱力カーブ・head主体の視線追従を手続き的実装で描画）と Live2D（Cubism 3/4 WebGL・自動スケール・GUI当たり判定 TouchZones）の両方に対応。
-  - **コンテキスト可視化ゲージ**: 6セグメント（System / Summary / History / Memory / Search / Reserved）のスタックバーにより、16,384 トークンの使用状況をミリ秒単位で可視化。
+  - **有向木会話ステート (Tree State)**: 会話履歴を有向木構造として IndexedDB（`LlamaUi`）に保持しつつ、サーバーマスター同期（`chats/`）によりPC・LAN・Tailscale間で一元同期。不変スナップショットと `reconcileSummarySnapshot` により、ブランチ切り替えや過去発言の編集・巻き戻し時にも要約文脈を復元。
+  - **デュアルアバターレンダリング**: VRM 3D（自然な呼吸・指の脱力カーブ・head主体の視線追従を手続き的実装で描画）と Live2D（Cubism 3/4 WebGL・自動スケール・GUI当たり判定 TouchZones）の両方に対応。240Hz等の高リフレッシュレート環境でもGPU帯域競合を抑えるアバター60fps制限・テキスト30fpsスロットリングを搭載。
+  - **コンテキスト可視化ゲージ**: 6セグメント（System / Summary / RAG & Memory / Recent Chat / Reasoning / Tools & Files）および空き容量のスタックバーにより、16,384 トークンの使用状況をミリ秒単位で可視化。
 - **2. セキュア・アクセス層 (Gateway: 8090)**:
   - **ローカル隔離**: LLM (8080), Backend (5000), TTS (5001) を `127.0.0.1` に厳格バインドし、外部ネットワークに露出させない設計。
   - **独立認証ゲートウェイ**: 単一ポート 8090（競合時は 8090〜8109 を自動探索スライド）でのみ外部待受。起動毎ランダムシークレットトークンと Cookie、HMAC-SHA256 タイミング攻撃防止。
   - **接続モード**: 同一Wi-Fi内直接通信の「LAN モード」と、WireGuard P2P暗号化メッシュによる「Tailscale モード」の2系統をサポート。
+  - **利用規約第9条セーフガード**: LAN/Tailscale経由のリモートアクセス時は、イラスト利用規約に準拠してLive2Dモデルの描画を抑止（トースト通知）し、Gateway側でアセット配信を403遮断（リモート端末ではVRM 3Dモデルを利用可能）。
 - **3. コア・バックエンド層 (推論・記憶・検索)**:
   - **16ブロック忘却スライディング**: 未要約30件または7,000トークン到達時に要約ブロック（300〜500トークン）へ自動圧縮。最大16ブロックを保持し、超過した最古2ブロックをChromaDBへ自動アーカイブ。
-  - **Dual-Query親子検索 (Parent-Child RAG)**: Fact記憶（距離 <= 0.135）とEpisode記憶（距離 <= 0.150）を独立検索し、統合Top-6を厳選。親データ（最大600文字/件）を想起上限最大3件・計約1,200文字で厳格トリム。
-  - **有向木世界線分離**: 選択中ブランチの祖先ノードID群（`active_message_ids`）のみでフィルタリングし、別世界線の記憶混入を遮断。
-  - **Prefix Caching保護の局所注入**: 想起記憶および相対時間タグ（`[たった今]`, `[3日前]` 等）を過去ログではなく「ユーザー発言直前」へ注入することで、過去ログ領域のKVキャッシュを保護。
-  - **自律Web検索 ＆ 気象予報**: 正規表現ゲートで日常会話の推論負荷を遮断。Stage 1 LLMで指示語解決、Stage 2 で DuckDuckGo/Open-Meteo取得、1時間インメモリキャッシュ。
+  - **Dual-Query親子検索 (Parent-Child RAG)**: Fact記憶（距離 <= 0.135）とEpisode記憶（距離 <= 0.150）を独立検索し、統合Top-6を厳選。親データ（最大650文字/件）を想起上限最大3件・計約1,200文字で厳格トリム。
+  - **有向木世界線分離**: 選択中ブランチの祖先ノードID群（`active_message_ids`）のみでフィルタリングし、別世界線の記憶混入を遮断（Debugパネルより全世界線記憶の横断想起トグルでオンオフ切替可能）。
+  - **Prefix Caching保護の局所注入**: 想起記憶および相対時間タグ（`[たった今]`, `[3日前]` 等）を過去ログではなく「ユーザー発言直前」へ注入することで、過去ログ領域のKVキャッシュを保護。16GB/24GBプロファイルではスロット退避復元により要約・検索推論時の会話キャッシュ消失を防止。
+  - **自律Web検索 ＆ 気象予報**: 正規表現ゲートで日常会話の推論負荷を遮断。Stage 1 LLMで指示語解決、Stage 2 で DuckDuckGo/Open-Meteo取得、1時間インメモリキャッシュおよび5時間有効なインメモリ即席親子リトリーバル（EphemeralClient）を連携。
   - **音声認識 (STT)**: VRAMを消費しないCPU推論（`ReazonSpeech-K2`）を採用したオンデマンド遅延ロード。
 - **4. リアルタイム音声合成層 (Irodori-TTS: 5001)**:
   - **高品質ゼロショット音声合成**: 24kHz（Semantic-DACVAE）。24GB環境はBF16非量子化、16GB以下はfloat8量子化。
-  - **セリフ前処理 ＆ 非同期先行キャッシュ**: 思考タグ `<think>`・ト書き・マークダウンを自動ストリップ。文節再生中に後続チャンクを非同期パイプライン（Promise）で先行合成・キャッシュし待機時間を最小化。
+  - **セリフ前処理 ＆ 非同期先行キャッシュ**: 思考タグ `<think>`・ト書き・マークダウンを自動ストリップ。文節再生中に後続チャンクを非同期パイプライン（Promise）で先行合成・キャッシュし待機時間を最小化。初回発話遅延（TTFA）をメッセージtimingsおよびJSONLログに自動記録。
   - **Web Audio API 口パク ＆ 感情同期**: 音声をリアルタイムFFT解析し滑らかな口開閉（`ParamMouthOpenY`）を実現。テキスト内の感情語比率と音声再生進捗をリアルタイム同期。
 
 ---
@@ -228,22 +229,24 @@ flowchart TD
 | 仕様書 | 主な内容 |
 | :--- | :--- |
 | **[外部通信一覧仕様書](docs/external-connections.md)** | 全外部通信先ドメイン、プロトコル、トリガー条件、遮断・制御方法 |
-| **[長期記憶・RAG・世界線分離仕様書](docs/memory-architecture.md)** | 16ブロック忘却、親子リトリーバル、相対時間プロキシ、世界線分離、KVキャッシュ挙動 |
-| **[Live2Dアバター・音声合成・音声認識仕様書](docs/avatar-and-audio.md)** | Live2D WebGL描画、GUIおさわり判定、Irodori-TTS先読み・口パク同期、音声認識 (STT) |
-| **[スマートWeb検索・気象予報仕様書](docs/web-search-and-weather.md)** | 2段階自律検索パイプライン、地名逆引き、Open-Meteo気象連携、KVキャッシュ保護 |
-| **[セキュア・リモートアクセス仕様書 (LAN / Tailscale)](docs/remote-access.md)** | 独立認証ゲートウェイ（8090）、トークン・Cookie保護、LAN/Tailscale接続手順、Doctor診断 |
-| **[モデル準備・詳細設定・アンインストール仕様書](docs/models-and-setup.md)** | 推奨モデル・Vision・Live2Dの手動配置先、ハードウェア別プロファイル、アンインストール手順 |
+| **[長期記憶・RAG・世界線分離仕様書](docs/memory-architecture.md)** | 16ブロック忘却、親子リトリーバル (親最大650字)、相対時間プロキシ、世界線分離トグル、KVキャッシュスロット退避復元、chats/同期 |
+| **[Live2Dアバター・音声合成・音声認識仕様書](docs/avatar-and-audio.md)** | Live2D WebGL描画、60fpsスロットリング、リモート時利用規約第9条セーフガード、GUIおさわり判定、Irodori-TTS先読み・口パク同期・TTFA記録、音声認識 (STT) |
+| **[スマートWeb検索・気象予報仕様書](docs/web-search-and-weather.md)** | 2段階自律検索パイプライン、地名逆引き、Open-Meteo気象連携、即席Webリトリーバル (5時間TTL)、KVキャッシュ保護 |
+| **[セキュア・リモートアクセス仕様書 (LAN / Tailscale)](docs/remote-access.md)** | 独立認証ゲートウェイ（8090）、トークン・Cookie保護、LAN/Tailscale接続手順、Live2D利用規約第9条セーフガード (403遮断)、Doctor診断 |
+| **[モデル準備・詳細設定・アンインストール仕様書](docs/models-and-setup.md)** | 初期設定ウィザード、推奨モデル・Vision・Live2Dの手動配置先、ハードウェア別プロファイル (RAM24GB未満の動的mmap制御)、update.bat、アンインストール手順 |
 
 ---
 
 ## [Limitations] 既知の制限
 
-1. **音声認識 (STT) は試験的機能**: `ReazonSpeech-K2` による音声入力は現在試験的な提供にとどまります。周囲のノイズやマイク音量によって誤認識が発生する場合があります。
-2. **Vision エンコーダの既定有効は 24GB 級のみ**: 画像認識エンコーダ（`mmproj`）はVRAM消費と速度の観点から、既定では 24GB プロファイルでのみ有効化されます（22GB未満環境でも手動有効化可能）。
-3. **コンテキスト長は 16,384 トークン設計**: 16ブロック忘却機構と生ログ枠・生成枠を考慮した配分で設計されています。
-4. **自律要約はブラウザを開いている間のみ進行**: 対話の要約圧縮や長期記憶の抽出はフロントエンド主導で処理されるため、ブラウザを閉じている間は進行しません。
-5. **VRM の視線は head 回転主体で、目ボーンの可動域はモデル依存**: 視線追従は主に head 回転（yaw: 最大約20度、pitch: 最大約10度）で表現されます。目ボーンの可動範囲はモデル依存です。
-6. **VRM 待機モーションは手続き的生成（VRMA 不使用）**: 待機ポーズ（脱力ポーズ + 指のリラックスカーブ + 呼吸）はロード時に bone 計測で符号を決める手続き的実装です。
+1. **現行パイプラインは日本語環境に最適化**: v0.1.2 の既定モデル群（Irodori-TTS、ruri-v3-310m 埋め込み、ReazonSpeech-K2 音声認識）および詳細仕様書は日本語向けに最適化されています。英語圏向け OSS モデルへの切り替えパイプラインはロードマップにて計画中です。
+2. **音声認識 (STT) は試験的機能**: `ReazonSpeech-K2` による音声入力は現在試験的な提供にとどまります。周囲のノイズやマイク音量によって誤認識が発生する場合があります。
+3. **Vision エンコーダの既定有効は 24GB 級のみ**: 画像認識エンコーダ（`mmproj`）はVRAM消費と速度の観点から、既定では 24GB プロファイルでのみ有効化されます（22GB未満環境でも手動有効化可能）。
+4. **コンテキスト長は 16,384 トークン設計**: 16ブロック忘却機構と生ログ枠・生成枠を考慮した配分で設計されています。
+5. **自律要約はブラウザを開いている間のみ進行**: 対話の要約圧縮や長期記憶の抽出はフロントエンド主導で処理されるため、ブラウザを閉じている間は進行しません。
+6. **VRM の視線は head 回転主体で、目ボーンの可動域はモデル依存**: 視線追従は主に head 回転（yaw: 最大約20度、pitch: 最大約10度）で表現されます。目ボーンの可動範囲はモデル依存です。
+7. **VRM 待機モーションは手続き的生成（VRMA 不使用）**: 待機ポーズ（脱力ポーズ + 指のリラックスカーブ + 呼吸）はロード時に bone 計測で符号を決める手続き的実装です。
+8. **フォアグラウンド表示時における描画オーバーヘッド**: PC 上で 240Hz 等の高リフレッシュレートブラウザをフォアグラウンド表示している場合、DWM 画面合成およびアバター描画（60fps）が動作するため、最小化時（完全非描画）と比較して約 1.4ms/tok（約 7〜11 TPS）の微小な速度差が生じます（描画処理を伴う WebUI としての既知の動作境界）。
 
 ---
 

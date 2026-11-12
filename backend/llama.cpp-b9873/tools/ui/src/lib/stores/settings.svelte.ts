@@ -137,6 +137,14 @@ class SettingsStore {
 				this.saveConfig();
 			}
 
+			// 既存のユーザー向けに、初回のみ preEncodeConversation (非同期KVキャッシュ先読み) をデフォルト true に設定するマイグレーション
+			const hasMigratedPreEncode = localStorage.getItem('hasMigratedPreEncodeConversation_v1');
+			if (!hasMigratedPreEncode) {
+				this.config[SETTINGS_KEYS.PRE_ENCODE_CONVERSATION] = true;
+				localStorage.setItem('hasMigratedPreEncodeConversation_v1', 'true');
+				this.saveConfig();
+			}
+
 			// Default sendOnEnter to false on mobile when the user has no saved preference
 			if (!(SETTINGS_KEYS.SEND_ON_ENTER in savedVal)) {
 				if (isMobile.current) {

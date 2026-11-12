@@ -485,12 +485,13 @@ window.prefetchTTS = function (text) {
 
     const entry = {
         audioUrl: null,
-        promise: null
+        promise: null,
+        consumed: false
     };
 
     entry.promise = (async () => {
         try {
-            console.log(`⚡ [先読みプリフェッチ開始] "${cleanText.slice(0, 18)}..."`);
+            console.log(`[INFO] [先読みプリフェッチ開始] "${cleanText.slice(0, 18)}..."`);
             const response = await fetch(getTtsEndpoint(), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -502,13 +503,13 @@ window.prefetchTTS = function (text) {
                 const blob = await response.blob();
                 const audioUrl = URL.createObjectURL(blob);
                 entry.audioUrl = audioUrl;
-                console.log(`✅ [先読み完了・キャッシュ保持] "${cleanText.slice(0, 18)}..." 準備完了 (即時再生可能) [キャッシュ件数: ${ttsPrefetchCache.size}]`);
+                console.log(`[OK] [先読み完了・キャッシュ保持] "${cleanText.slice(0, 18)}..." 準備完了 (即時再生可能) [キャッシュ件数: ${ttsPrefetchCache.size}]`);
                 return audioUrl;
             }
             return null;
         } catch (e) {
             if (e.name !== 'AbortError') {
-                console.warn(`[先読み例外] "${cleanText.slice(0, 18)}...":`, e);
+                console.warn(`[WARN] [先読み例外] "${cleanText.slice(0, 18)}...":`, e);
             }
             return null;
         }
@@ -543,28 +544,44 @@ async function processTtsQueue() {
     const queueItem = ttsQueue.shift();
     const text = typeof queueItem === 'string' ? queueItem : queueItem.text;
     const emotionText = typeof queueItem === 'string' ? queueItem : (queueItem.emotionText || queueItem.text);
+    let synthesisNotified = false;
+    const notifySynthesized = (resultUrl) => {
+        if (synthesisNotified) return;
+        synthesisNotified = true;
+        if (queueItem && typeof queueItem === 'object' && typeof queueItem.onSynthesized === 'function') {
+            try {
+                queueItem.onSynthesized(resultUrl || null);
+            } catch (e) { }
+        }
+    };
     try {
         const timeline = analyzeExpressionTimeline(emotionText);
         let currentEventIndex = 0;
 
         let audioUrl = null;
-        // ⚡ 先読みキャッシュチェック：既に合成完了していれば待ち時間0秒で即再生！
+        // 先読みキャッシュチェック：既に合成完了または合成中であれば待機して再利用し、二重リクエストを防止
         if (ttsPrefetchCache.has(text)) {
             const cached = ttsPrefetchCache.get(text);
-            ttsPrefetchCache.delete(text);
-            console.log(`⏳ [先読みキャッシュ参照] "${text.slice(0, 18)}..." (待機中/取得中)`);
-            audioUrl = cached.audioUrl || (await cached.promise);
-            if (currentGen !== ttsGenerationId) {
-                console.log('[TTS] Prefetch audio cancelled by stopTTS or superseded');
-                return;
-            }
-            if (audioUrl) {
-                console.log(`🚀 [先読みヒット！待ち時間0秒で即時再生] "${text.slice(0, 18)}..."`);
-            } else {
-                console.warn(`⚠️ [先読みキャッシュ取得失敗 (null)] "${text.slice(0, 18)}..." ➔ 通常合成リクエストへ移行`);
+            if (!cached.consumed) {
+                cached.consumed = true;
+                console.log(`[INFO] [先読みキャッシュ参照] "${text.slice(0, 18)}..." (待機中/取得中)`);
+                audioUrl = cached.audioUrl || (await cached.promise);
+                cached.audioUrl = null;
+                if (currentGen !== ttsGenerationId) {
+                    if (audioUrl && audioUrl.startsWith('blob:')) {
+                        try { URL.revokeObjectURL(audioUrl); } catch (e) { }
+                    }
+                    console.log('[TTS] Prefetch audio cancelled by stopTTS or superseded');
+                    return;
+                }
+                if (audioUrl) {
+                    console.log(`[OK] [先読みヒット] "${text.slice(0, 18)}..."`);
+                } else {
+                    console.warn(`[WARN] [先読みキャッシュ取得失敗 (null)] "${text.slice(0, 18)}..." -> 通常合成リクエストへ移行`);
+                }
             }
         } else {
-            console.log(`ℹ️ [先読みキャッシュ未登録] "${text.slice(0, 18)}..." ➔ 通常合成リクエスト開始`);
+            console.log(`[INFO] [先読みキャッシュ未登録] "${text.slice(0, 18)}..." -> 通常合成リクエスト開始`);
         }
 
         if (!audioUrl) {
@@ -588,26 +605,45 @@ async function processTtsQueue() {
             } catch (e) {
                 currentSpeed = window.deiningTtsSpeed || 1.2;
             }
-            console.log(`🔊 TTSリクエスト送信中 (${getTtsEndpoint()}): speed=${currentSpeed}, split_chunks=${currentSplitChunks}`);
-            const response = await fetch(getTtsEndpoint(), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: text, speed: currentSpeed, split_chunks: currentSplitChunks }),
-                mode: 'cors',
-                signal: ttsAbortController.signal
-            });
+            console.log(`[INFO] TTSリクエスト送信中 (${getTtsEndpoint()}): speed=${currentSpeed}, split_chunks=${currentSplitChunks}`);
+            const directEntry = {
+                audioUrl: null,
+                promise: null,
+                consumed: true
+            };
+            directEntry.promise = (async () => {
+                const response = await fetch(getTtsEndpoint(), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text, speed: currentSpeed, split_chunks: currentSplitChunks }),
+                    mode: 'cors',
+                    signal: ttsAbortController.signal
+                });
+
+                if (currentGen !== ttsGenerationId) {
+                    return null;
+                }
+
+                if (response.ok) {
+                    const blob = await response.blob();
+                    if (currentGen !== ttsGenerationId) return null;
+                    return URL.createObjectURL(blob);
+                }
+                return null;
+            })();
+            ttsPrefetchCache.set(text, directEntry);
+            audioUrl = await directEntry.promise;
 
             if (currentGen !== ttsGenerationId) {
+                if (audioUrl && audioUrl.startsWith('blob:')) {
+                    try { URL.revokeObjectURL(audioUrl); } catch (e) { }
+                }
                 console.log('[TTS] Request cancelled by stopTTS or superseded');
                 return;
             }
-
-            if (response.ok) {
-                const blob = await response.blob();
-                if (currentGen !== ttsGenerationId) return;
-                audioUrl = URL.createObjectURL(blob);
-            }
         }
+
+        notifySynthesized(audioUrl);
 
         if (currentGen !== ttsGenerationId) {
             if (audioUrl && audioUrl.startsWith('blob:')) {
@@ -705,6 +741,8 @@ async function processTtsQueue() {
         currentAudioPlayer = null;
         isProcessingTts = false;
         processTtsQueue();
+    } finally {
+        notifySynthesized(null);
     }
 }
 
@@ -748,14 +786,20 @@ window.playTTS = function (text, force = false, rawTextForEmotion = '') {
     // UI側でTTSが有効化されているかチェック（forceがtrueなら無視）
     if (!force) {
         const isTtsEnabled = localStorage.getItem('deining_tts_enabled') === 'true';
-        if (!isTtsEnabled) return;
+        if (!isTtsEnabled) return Promise.resolve(null);
     }
 
     const cleanText = sanitizeTextForTTS(text);
-    if (!cleanText) return;
+    if (!cleanText) return Promise.resolve(null);
 
-    ttsQueue.push({ text: cleanText, emotionText: rawTextForEmotion || text });
-    processTtsQueue();
+    return new Promise((resolve) => {
+        ttsQueue.push({
+            text: cleanText,
+            emotionText: rawTextForEmotion || text,
+            onSynthesized: resolve
+        });
+        processTtsQueue();
+    });
 };
 
 // 時分割パイプライン用: 音声合成が完了してブラウザで再生が始まった瞬間(play発火)にresolveするPromise
@@ -961,6 +1005,11 @@ window.stopTTS = function (clearPrefetch = false) {
         console.log('[stopTTS] All prefetch cache cleared');
     }
 
+    for (const item of ttsQueue) {
+        if (item && typeof item === 'object' && typeof item.onSynthesized === 'function') {
+            try { item.onSynthesized(null); } catch (e) { }
+        }
+    }
     ttsQueue.length = 0;
     if (currentAudioPlayer) {
         try {
@@ -1406,7 +1455,7 @@ async function mountAvatarSystem() {
             autoDensity: true
         });
 
-        // 泥濘: 240Hz等の高リフレッシュレート環境におけるGPU VRAMメモリ帯域競合を防止する Live2D 30fps スロットリング
+        // 泥濘: 240Hz等の高リフレッシュレート環境におけるGPU VRAMメモリ帯域競合を低減する Live2D 60fps スロットリング
         if (app && app.ticker) {
             app.ticker.maxFPS = 60;
         }

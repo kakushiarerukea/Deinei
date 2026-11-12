@@ -708,13 +708,9 @@ const SETTINGS_REGISTRY: Record<string, SettingsSectionEntry> = {
 				key: SETTINGS_KEYS.PRE_ENCODE_CONVERSATION,
 				label: 'Pre-fill KV cache after response',
 				help: 'After each response, re-submit the conversation to pre-fill the server KV cache. Makes the next turn faster since the prompt is already encoded while you read the response.',
-				defaultValue: false,
+				defaultValue: true,
 				type: SettingsFieldType.CHECKBOX,
-				section: SETTINGS_SECTION_SLUGS.DEVELOPER,
-				sync: {
-					serverKey: SETTINGS_KEYS.PRE_ENCODE_CONVERSATION,
-					paramType: SyncableParameterType.BOOLEAN
-				}
+				section: SETTINGS_SECTION_SLUGS.DEVELOPER
 			},
 			{
 				key: SETTINGS_KEYS.DISABLE_REASONING_PARSING,

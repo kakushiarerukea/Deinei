@@ -489,6 +489,99 @@ class TestUiStores(unittest.TestCase):
         self.assertIn(r"backend\llama.cpp-b9873\custom_public", ps1_text)
         self.assertIn("start_ai_servers.bat", ps1_text)
 
+    def test_14_background_kv_precache_pipeline(self):
+        """非同期KVキャッシュ先読み（Background Pre-caching）機構の配線・設定既定値・共通プロンプト構築を検証。"""
+        chat_service_path = os.path.join(
+            REPO_ROOT,
+            "backend",
+            "llama.cpp-b9873",
+            "tools",
+            "ui",
+            "src",
+            "lib",
+            "services",
+            "chat.service.ts",
+        )
+        asst_path = os.path.join(
+            REPO_ROOT,
+            "backend",
+            "llama.cpp-b9873",
+            "tools",
+            "ui",
+            "src",
+            "lib",
+            "components",
+            "app",
+            "chat",
+            "ChatMessages",
+            "ChatMessage",
+            "ChatMessageAssistant",
+            "ChatMessageAssistant.svelte",
+        )
+        avatar_core_path = os.path.join(
+            REPO_ROOT,
+            "backend",
+            "llama.cpp-b9873",
+            "tools",
+            "ui",
+            "static",
+            "deining",
+            "avatar-core-v2.js",
+        )
+        settings_reg_path = os.path.join(
+            REPO_ROOT,
+            "backend",
+            "llama.cpp-b9873",
+            "tools",
+            "ui",
+            "src",
+            "lib",
+            "constants",
+            "settings-registry.ts",
+        )
+        with open(CHAT_STORE_PATH, "r", encoding="utf-8") as f:
+            chat_store = f.read()
+        with open(chat_service_path, "r", encoding="utf-8") as f:
+            chat_service = f.read()
+        with open(asst_path, "r", encoding="utf-8") as f:
+            asst_src = f.read()
+        with open(avatar_core_path, "r", encoding="utf-8") as f:
+            avatar_core = f.read()
+        with open(settings_reg_path, "r", encoding="utf-8") as f:
+            settings_reg = f.read()
+
+        # 1. avatar-core-v2.js と ChatMessageAssistant.svelte の最終TTS合成完了イベント通知・スキップ連動・二重合成防止
+        self.assertIn("onSynthesized", avatar_core)
+        self.assertIn("cached.consumed = true", avatar_core)
+        self.assertIn("deiningTtsSynthesisAllComplete", asst_src)
+        self.assertIn("notifyTtsSynthesisAllComplete", asst_src)
+        self.assertIn("synthesisPipelineId", asst_src)
+        self.assertIn("last_segment_synthesized", asst_src)
+        self.assertIn("sequence_reached_end", asst_src)
+        self.assertIn("audio_sequence_stopped", asst_src)
+        self.assertNotIn("if (isAborted || !isAudioSequenceActive || targetSeq !== sequenceId) return;", asst_src)
+
+        # 2. chat.svelte.ts の共通プロンプト構築・バックグラウンド順序制御・要約待機引き継ぎ・即時完了フラグ共有
+        self.assertIn("buildProcessedMessagesForLLM(", chat_store)
+        self.assertIn("schedulePostTurnBackgroundTasks(", chat_store)
+        self.assertIn("cancelPostTurnBackgroundTasks(", chat_store)
+        self.assertIn("activeSummarizePromise", chat_store)
+        self.assertIn("await this.activeSummarizePromise", chat_store)
+        self.assertIn("__lastTtsSynthesizedMessageId", chat_store)
+
+        # 3. chat.service.ts の preEncode ペイロード整合性（add_generation_prompt: false, is_precache: true, force_clear_saved_kv, 末尾空userプレースホルダ）
+        self.assertIn("add_generation_prompt: false", chat_service)
+        self.assertIn("is_precache: true", chat_service)
+        self.assertIn("force_clear_saved_kv: Boolean(options?.forceClearSavedKv)", chat_service)
+        self.assertIn("id_slot: 0", chat_service)
+        self.assertIn("mappedMessages[mappedMessages.length - 1].role !== MessageRole.USER", chat_service)
+        self.assertIn("if (item.index <= currentSegmentIndex)", asst_src)
+
+        # 4. settings-registry.ts の preEncodeConversation デフォルト有効化
+        self.assertIn("key: SETTINGS_KEYS.PRE_ENCODE_CONVERSATION", settings_reg)
+        pre_encode_block = settings_reg.split("key: SETTINGS_KEYS.PRE_ENCODE_CONVERSATION")[1][:400]
+        self.assertIn("defaultValue: true", pre_encode_block)
+
 
 if __name__ == "__main__":
     unittest.main()

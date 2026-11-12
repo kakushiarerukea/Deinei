@@ -256,6 +256,11 @@ class ChatStore {
 	private abortControllers = new SvelteMap<string, AbortController>();
 	private abortedMessageIds = new SvelteSet<string>();
 	private preEncodeAbortController: AbortController | null = null;
+	private preEncodeConvId: string | null = null;
+	private activePreEncodePromise: Promise<void> | null = null;
+	private activeSummarizePromise: Promise<boolean> | null = null;
+	private skipNextPreEncode = false;
+	private postTurnCleanupFn: (() => void) | null = null;
 	private processingStates = new SvelteMap<string, ApiProcessingState | null>();
 	private conversationStateTimestamps = new SvelteMap<string, ConversationStateEntry>();
 	private summaryFailuresByConv = new SvelteMap<string, number>();
@@ -1140,12 +1145,42 @@ class ChatStore {
 	 * Conversation auto summarization and memory extraction
 	 *
 	 * @param forceRun - Force run summarization even if unsummarized messages < 30
+	 * @returns true if summarization was executed and conversation summary state was updated
 	 */
-	async updateAIHistory(forceRun = false): Promise<void> {
+	async updateAIHistory(forceRun = false): Promise<boolean> {
+		if (this.activeSummarizePromise) {
+			return this.activeSummarizePromise;
+		}
+		const runPromise = this._runUpdateAIHistory(forceRun);
+		this.activeSummarizePromise = runPromise;
+		try {
+			const summarized = await runPromise;
+			if (
+				forceRun &&
+				summarized &&
+				!this.skipNextPreEncode &&
+				config().preEncodeConversation !== false &&
+				conversationsStore.activeConversation
+			) {
+				this.triggerPreEncode(
+					conversationsStore.activeConversation.id,
+					selectedModelName() || null,
+					true
+				).catch(console.error);
+			}
+			return summarized;
+		} finally {
+			if (this.activeSummarizePromise === runPromise) {
+				this.activeSummarizePromise = null;
+			}
+		}
+	}
+
+	private async _runUpdateAIHistory(forceRun = false): Promise<boolean> {
 		console.trace('[DEBUG_TRACE] updateAIHistory called. forceRun:', forceRun);
-		if (this.isSummarizing) return;
+		if (this.isSummarizing) return false;
 		const activeConv = conversationsStore.activeConversation;
-		if (!activeConv) return;
+		if (!activeConv) return false;
 
 		const currentConfig = config();
 		const activeMessages = conversationsStore.activeMessages;
@@ -1187,7 +1222,7 @@ class ChatStore {
 		// 自動要約がオフで、かつ強制実行でもない場合はスキップ
 		if (!currentConfig.autoSummarize && !forceRun) {
 			console.log('[DEBUG_SUMMARIZE_SKIP] autoSummarize is disabled and not forceRun');
-			return;
+			return false;
 		}
 
 		// Force Runの場合：未要約メッセージが少なすぎる（4件未満）場合は無意味な超小ブロック化を防止
@@ -1196,7 +1231,7 @@ class ChatStore {
 			if (typeof toast !== 'undefined' && toast?.info) {
 				toast.info(t('toast.notEnoughMessagesToSummarize', '未要約のメッセージが少なすぎるため、要約をスキップしました（最低4件必要です）。'));
 			}
-			return;
+			return false;
 		}
 
 		// 未要約件数30件到達 または 未要約トークン数7000トークン到達で要約を発火
@@ -1205,7 +1240,7 @@ class ChatStore {
 
 		if (!forceRun && !countThresholdReached && !tokenThresholdReached) {
 			console.log('[DEBUG_SUMMARIZE_SKIP] Threshold not reached (unsummarized < 30 and tokens < 7000):', { unsummarized, unsummarizedTokens });
-			return;
+			return false;
 		}
 
 		// 直近の文脈を残して要約範囲（endIdx）を決定
@@ -1221,7 +1256,7 @@ class ChatStore {
 		}
 
 		if (lastIdx >= endIdx) {
-			return;
+			return false;
 		}
 
 		this.isSummarizing = true;
@@ -1234,6 +1269,7 @@ class ChatStore {
 		}, 1000);
 
 		const messagesToSummarize = dialogueMessages.slice(lastIdx, endIdx);
+		let indexUpdated = false;
 
 		try {
 			const targetMsgId = dialogueMessages[endIdx - 1]?.id || activeConv.currNode || '';
@@ -1372,13 +1408,12 @@ class ChatStore {
 					this.summaryFailuresByConv.set(activeConv.id, 0);
 				} else {
 					console.warn(`[AutoSummarize] 要約文の生成に失敗 (${currentFails}/3回目, 未要約${unsummarizedCount}件)。生ログを保持し、インデックスは進めずに次回ターンで再試行します。`);
-					return;
+					return false;
 				}
 			} else {
 				this.summaryFailuresByConv.set(activeConv.id, 0);
 			}
 
-			let indexUpdated = false;
 			try {
 				// 要約生成に成功した場合のみ、要約ブロックを追加して lastSummarizedIndex を進める（メッセージ消失防止）
 				const dbUpdates: Record<string, any> = {
@@ -1639,6 +1674,7 @@ class ChatStore {
 							}
 						}
 						this.summaryFailuresByConv.set(activeConv.id, 0);
+						indexUpdated = true;
 					} catch (dbErr) {
 						console.error('[AutoSummarize Catch] フォールバック更新失敗:', dbErr);
 					}
@@ -1651,6 +1687,7 @@ class ChatStore {
 			this.isSummarizing = false;
 			this.summarizeStatusText = '';
 		}
+		return indexUpdated;
 	}
 
 	/**
@@ -1759,16 +1796,13 @@ class ChatStore {
 		extras?: DatabaseMessageExtra[],
 		isHidden?: boolean
 	): Promise<void> {
-		if (this.isSummarizing) {
-			console.warn('Cannot send message during summarization / memory extraction.');
-			return;
-		}
 		if (!content.trim() && (!extras || extras.length === 0)) return;
 		const activeConv = conversationsStore.activeConversation;
 
 		// 隠しメッセージ（アバターからの自動送信）の場合：
-		// 既にストリーミング中・処理中の場合は送信しない（キューにも入れない）
+		// 既にストリーミング中・処理中・要約中の場合は送信しない（キューにも入れない）
 		if (isHidden) {
+			if (this.isSummarizing) return;
 			if (activeConv) {
 				if (this.isChatLoadingInternal(activeConv.id)) return;
 				if (agenticStore.isRunning(activeConv.id)) return;
@@ -1787,8 +1821,20 @@ class ChatStore {
 			return;
 		}
 
-		// Cancel any in-flight pre-encode request
-		this.cancelPreEncode();
+		// バックグラウンド待機中のタスク（TTS合成待ちリスナー等）をキャンセル
+		// 同一会話の先行Prefillが既に送信済みの場合は server.py 側のロックで完了後に引き継ぐ
+		this.cancelPostTurnBackgroundTasks(this.preEncodeConvId !== (activeConv?.id ?? null));
+
+		// バックグラウンド要約が実行中の場合は破棄せず完了を待機し、直後の冗長な先読みをスキップして推論へ引き継ぐ
+		if (this.activeSummarizePromise) {
+			this.skipNextPreEncode = true;
+			console.log('[INFO] [sendMessage] Waiting for in-flight background summarization to complete before inference...');
+			try {
+				await this.activeSummarizePromise;
+			} catch (sumWaitErr) {
+				console.warn('[WARN] [sendMessage] Background summarization ended with error:', sumWaitErr);
+			}
+		}
 
 		// Consume MCP resource attachments - converts them to extras and clears the live store
 		// (隠しメッセージの場合はMCPリソースを消費しない)
@@ -1802,6 +1848,7 @@ class ChatStore {
 		}
 		const currentConv = conversationsStore.activeConversation;
 		if (!currentConv) return;
+		ttsStore.stop(true);
 		this.showErrorDialog(null);
 		this.setChatLoading(currentConv.id, true);
 		this.clearChatStreaming(currentConv.id);
@@ -1877,19 +1924,19 @@ class ChatStore {
 		}
 	}
 
-	private async streamChatCompletion(
+	/**
+	 * LLM送信用のメッセージ配列（スライディング要約切り出し・要約済み画像除外・Systemプロンプト＋タイムライン結合）を構築する。
+	 * 通常推論 (streamChatCompletion) と バックグラウンドKV先読み (triggerPreEncode) の双方で同一メソッドを使用することで、
+	 * トークン列のプレフィックス一致を担保する。
+	 */
+	private buildProcessedMessagesForLLM(
 		allMessages: DatabaseMessage[],
-		assistantMessage: DatabaseMessage,
-		onComplete?: (content: string) => Promise<void>,
-		onError?: (error: Error) => void,
-		modelOverride?: string | null,
-		firstUserMessageContent?: string
-	): Promise<void> {
-		const activeConv = conversationsStore.activeConversation;
+		activeConv = conversationsStore.activeConversation
+	): DatabaseMessage[] {
 		let messagesToSend = [...allMessages];
 
 		// 1. スライディング/要約処理を適用（要約が存在する場合、要約済みの生ログを削ぎ落として二重送信を防ぐ）
-		// ★ KVキャッシュ(Prefix Caching)を保護するため、要約ブロック直後の生ログ先頭位置（safeSliceIdx）を厳密に固定する
+		// KVキャッシュ(Prefix Caching)を保護するため、要約ブロック直後の生ログ先頭位置（safeSliceIdx）を厳密に固定する
 		if (activeConv) {
 			const hasSummaries = (activeConv.aiHistoryTextList ?? []).length > 0;
 			const systemMsgs = messagesToSend.filter((m) => m.role === MessageRole.SYSTEM);
@@ -1957,12 +2004,11 @@ class ChatStore {
 			});
 		}
 
-		// 2. 泥濘要約リストと現在時刻をシステムメッセージへ動的注入する前に、
-		// Proxyやゲッターなどの副作用を排除したクローンを生成
+		// 2. 泥濘要約リストとシステムメッセージを結合する前に、Proxyやゲッターなどの副作用を排除したクローンを生成
 		// ※ 過去ターンの動的コンテキスト（injectedContext）はメタデータとしてDB保存済みだが、
 		// LLMプロンプトへの再注入は行わない（履歴膨張・古い日時残留・複数systemメッセージ問題を回避）。
 		// server.py が毎ターン最新のコンテキストを ephemeral に注入するため再注入は不要。
-		let processedMessages = messagesToSend.map((m) => {
+		const processedMessages = messagesToSend.map((m) => {
 			return JSON.parse(JSON.stringify(m)) as DatabaseMessage;
 		});
 		const systemIdx = processedMessages.findIndex((m) => m.role === MessageRole.SYSTEM);
@@ -2019,7 +2065,21 @@ class ChatStore {
 				children: []
 			} as DatabaseMessage);
 		}
-		// 出力基盤ルールが無効かつシステムメッセージも要約タイムラインも無い場合、systemロールのメッセージは0件（完全削除）
+
+		return processedMessages;
+	}
+
+	private async streamChatCompletion(
+		allMessages: DatabaseMessage[],
+		assistantMessage: DatabaseMessage,
+		onComplete?: (content: string) => Promise<void>,
+		onError?: (error: Error) => void,
+		modelOverride?: string | null,
+		firstUserMessageContent?: string
+	): Promise<void> {
+		const activeConv = conversationsStore.activeConversation;
+		const messagesToSend = [...allMessages];
+		const processedMessages = this.buildProcessedMessagesForLLM(messagesToSend, activeConv);
 
 		// [INFO_PAYLOAD] LLMに送信されるメッセージペイロードの最終状態を出力
 		console.log('[DEBUG_PAYLOAD] Final messages to LLM:', {
@@ -2375,22 +2435,35 @@ class ChatStore {
 					}).catch(console.error);
 				}
 
+				let earlyTtsDone = false;
+				let earlyTtsReason = '';
+				const earlyTtsHandler = (e: Event) => {
+					const detail = (e as CustomEvent<{ messageId?: string; reason?: string }>).detail;
+					if (!detail?.messageId || detail.messageId === currentMessageId) {
+						earlyTtsDone = true;
+						earlyTtsReason = detail?.reason || 'event';
+					}
+				};
+				if (typeof window !== 'undefined') {
+					window.addEventListener('deiningTtsSynthesisAllComplete', earlyTtsHandler);
+				}
+
 				cleanupStreamingState();
 
-				this.updateAIHistory().catch(console.error);
+				if (typeof window !== 'undefined') {
+					window.removeEventListener('deiningTtsSynthesisAllComplete', earlyTtsHandler);
+				}
 
 				if (onComplete) onComplete(streamedContent);
 				if (isRouterMode()) modelsStore.fetchRouterModels().catch(console.error);
-				// Pre-encode conversation in KV cache for faster next turn
-				if (config().preEncodeConversation) {
-					this.triggerPreEncode(
-						processedMessages,
-						assistantMessage,
-						streamedContent,
-						effectiveModel,
-						true
-					);
-				}
+
+				this.schedulePostTurnBackgroundTasks(
+					convId,
+					currentMessageId,
+					effectiveModel,
+					earlyTtsDone,
+					earlyTtsReason
+				);
 			},
 			onError: async (error: Error) => {
 				this.setStreamingActive(false);
@@ -2537,9 +2610,21 @@ class ChatStore {
 							DatabaseService.updateMessage(targetParentId, { injectedContext: recalledMemoriesData.injected_context }).catch(() => {});
 						}
 					}
-					cleanupStreamingState();
 
-					this.updateAIHistory().catch(console.error);
+					let earlyTtsDone = false;
+					let earlyTtsReason = '';
+					const earlyTtsHandler = (e: Event) => {
+						const detail = (e as CustomEvent<{ messageId?: string; reason?: string }>).detail;
+						if (!detail?.messageId || detail.messageId === currentMessageId) {
+							earlyTtsDone = true;
+							earlyTtsReason = detail?.reason || 'event';
+						}
+					};
+					if (typeof window !== 'undefined') {
+						window.addEventListener('deiningTtsSynthesisAllComplete', earlyTtsHandler);
+					}
+
+					cleanupStreamingState();
 
 					if (onComplete) await onComplete(content);
 					if (isRouterMode()) modelsStore.fetchRouterModels().catch(console.error);
@@ -2553,7 +2638,24 @@ class ChatStore {
 					// Check if there's a pending message queued during streaming
 					const pending = this.consumePendingMessage(convId);
 					if (pending) {
+						if (typeof window !== 'undefined') {
+							window.removeEventListener('deiningTtsSynthesisAllComplete', earlyTtsHandler);
+						}
 						await this.sendMessage(pending.content, pending.extras);
+						return;
+					}
+
+					// 最後のTTS音声生成が完了した直後に、要約および非同期KVキャッシュ先読みをバックグラウンド実行
+					this.schedulePostTurnBackgroundTasks(
+						convId,
+						currentMessageId,
+						effectiveModel,
+						earlyTtsDone,
+						earlyTtsReason
+					);
+
+					if (typeof window !== 'undefined') {
+						window.removeEventListener('deiningTtsSynthesisAllComplete', earlyTtsHandler);
 					}
 				},
 				onError: streamCallbacks.onError
@@ -2910,6 +3012,7 @@ class ChatStore {
 	async deleteMessage(messageId: string): Promise<void> {
 		const activeConv = conversationsStore.activeConversation;
 		if (!activeConv) return;
+		this.cancelPostTurnBackgroundTasks(true);
 		try {
 			const allMessages = await conversationsStore.getConversationMessages(activeConv.id);
 			let messageToDelete = findMessageById(allMessages, messageId);
@@ -3655,39 +3758,200 @@ class ChatStore {
 			this.preEncodeAbortController.abort();
 			this.preEncodeAbortController = null;
 		}
+		this.preEncodeConvId = null;
 	}
 
-	private async triggerPreEncode(
-		allMessages: DatabaseMessage[],
-		assistantMessage: DatabaseMessage,
-		assistantContent: string,
-		model?: string | null,
-		excludeReasoning?: boolean
-	): Promise<void> {
-		return;
-		this.cancelPreEncode();
-		this.preEncodeAbortController = new AbortController();
-
-		const signal = this.preEncodeAbortController.signal;
-
-		try {
-			const allIdle = await ChatService.areAllSlotsIdle(model, signal);
-			if (!allIdle || signal.aborted) return;
-
-			const messagesWithAssistant: DatabaseMessage[] = [
-				...allMessages,
-				{ ...assistantMessage, content: assistantContent }
-			];
-
-			await ChatService.preEncode(messagesWithAssistant, model, excludeReasoning, signal);
-		} catch (err) {
-			if (!isAbortError(err)) {
-				console.warn('[ChatStore] Pre-encode failed:', err);
+	private cancelPostTurnBackgroundTasks(abortInFlightPreEncode = true): void {
+		if (this.postTurnCleanupFn) {
+			try {
+				this.postTurnCleanupFn();
+			} catch {
+				// ignore cleanup errors
 			}
+			this.postTurnCleanupFn = null;
+		}
+		if (abortInFlightPreEncode) {
+			this.cancelPreEncode();
 		}
 	}
 
+	/**
+	 * AI応答完了後、最後のセリフのTTS音声生成完了を待ってから
+	 * (1) 自動要約・事実抽出 (updateAIHistory)
+	 * (2) 確定済み会話履歴（または新要約＋直近10件）のKVキャッシュ先読み (triggerPreEncode)
+	 * を非同期バックグラウンドタスクとして順次実行する。
+	 */
+	private schedulePostTurnBackgroundTasks(
+		convId: string,
+		assistantMessageId: string,
+		effectiveModel?: string | null,
+		alreadyTtsCompleted = false,
+		alreadyTtsReason = ''
+	): void {
+		this.cancelPostTurnBackgroundTasks(false);
+		this.skipNextPreEncode = false;
+
+		if (this.isMessageAborted(assistantMessageId)) {
+			return;
+		}
+
+		let hasStarted = false;
+		const runPipeline = async (triggerReason: string) => {
+			if (hasStarted) return;
+			hasStarted = true;
+			if (this.postTurnCleanupFn) {
+				try {
+					this.postTurnCleanupFn();
+				} catch {
+					// ignore
+				}
+				this.postTurnCleanupFn = null;
+			}
+
+			// マイクロタスク1回待機してストリーム終了状態への遷移を確定させる
+			await Promise.resolve();
+
+			if (
+				this.isMessageAborted(assistantMessageId) ||
+				this.isChatLoadingInternal(convId) ||
+				conversationsStore.activeConversation?.id !== convId
+			) {
+				return;
+			}
+
+			console.log(
+				`[INFO] [KV Pre-cache Pipeline] Starting post-turn background pipeline (reason=${triggerReason}, convId=${convId})`
+			);
+
+			try {
+				const summarized = await this.updateAIHistory(false);
+
+				if (
+					this.skipNextPreEncode ||
+					this.isMessageAborted(assistantMessageId) ||
+					this.isChatLoadingInternal(convId) ||
+					conversationsStore.activeConversation?.id !== convId
+				) {
+					return;
+				}
+
+				if (config().preEncodeConversation !== false) {
+					await this.triggerPreEncode(convId, effectiveModel, summarized);
+				}
+			} catch (err) {
+				console.warn('[WARN] [KV Pre-cache Pipeline] Error in background pipeline:', err);
+			}
+		};
+
+		const isTtsEnabled =
+			typeof window !== 'undefined' && localStorage.getItem('deining_tts_enabled') === 'true';
+		const win = typeof window !== 'undefined' ? (window as any) : null;
+		const windowRecordedComplete =
+			Boolean(win && assistantMessageId && win.__lastTtsSynthesizedMessageId === assistantMessageId);
+		const effectiveAlreadyDone = alreadyTtsCompleted || windowRecordedComplete;
+		const effectiveReason =
+			alreadyTtsReason || (windowRecordedComplete ? String(win.__lastTtsSynthesizedReason || 'window_recorded') : '');
+
+		if (!isTtsEnabled || effectiveAlreadyDone || typeof window === 'undefined') {
+			const reason = effectiveAlreadyDone
+				? `tts_already_completed:${effectiveReason}`
+				: 'tts_disabled';
+			setTimeout(() => {
+				runPipeline(reason);
+			}, 20);
+			return;
+		}
+
+		const onTtsSynthesisComplete = (e: Event) => {
+			const detail = (
+				e as CustomEvent<{ messageId?: string; convId?: string; reason?: string }>
+			).detail;
+			if (!detail?.messageId || detail.messageId === assistantMessageId) {
+				runPipeline(`tts_synthesis_complete:${detail?.reason || 'event'}`);
+			}
+		};
+
+		window.addEventListener('deiningTtsSynthesisAllComplete', onTtsSynthesisComplete);
+		const fallbackTimer = setTimeout(() => {
+			runPipeline('tts_fallback_timeout');
+		}, 45000);
+
+		this.postTurnCleanupFn = () => {
+			window.removeEventListener('deiningTtsSynthesisAllComplete', onTtsSynthesisComplete);
+			clearTimeout(fallbackTimer);
+		};
+	}
+
+	private async triggerPreEncode(
+		convId: string,
+		model?: string | null,
+		afterSummary = false
+	): Promise<void> {
+		const activeConv = conversationsStore.activeConversation;
+		if (!activeConv || activeConv.id !== convId) return;
+		if (this.isChatLoadingInternal(convId) || this.isSummarizing) return;
+
+		const rawMessages = conversationsStore.activeMessages;
+		if (!rawMessages || rawMessages.length === 0) return;
+
+		// 未要約かつ40件超えフォールバック中は次ターンで先頭位置がスライドするため先読みをスキップ
+		const hasSummaries = (activeConv.aiHistoryTextList ?? []).length > 0;
+		const dialogueMsgs = rawMessages.filter(
+			(m) => m.type !== 'root' && m.role !== MessageRole.SYSTEM
+		);
+		if (!hasSummaries && dialogueMsgs.length > 40) {
+			return;
+		}
+
+		this.cancelPreEncode();
+		this.preEncodeAbortController = new AbortController();
+		this.preEncodeConvId = convId;
+
+		const signal = this.preEncodeAbortController.signal;
+		const processedMessages = this.buildProcessedMessagesForLLM(rawMessages, activeConv);
+		const apiOptions = this.getApiOptions();
+		const effectiveModel = isRouterMode()
+			? model || selectedModelName() || this.getConversationModel(processedMessages)
+			: undefined;
+
+		console.log(
+			`[INFO] [KV Pre-cache] Sending background pre-encode request (convId=${convId}, msgCount=${processedMessages.length}, afterSummary=${afterSummary})`
+		);
+
+		const runPromise = (async () => {
+			try {
+				await ChatService.preEncode(
+					processedMessages,
+					effectiveModel,
+					Boolean(apiOptions.excludeReasoningFromContext),
+					signal,
+					{
+						conversationId: convId,
+						enableThinking: Boolean(apiOptions.enableThinking),
+						disableReasoningParsing: Boolean(apiOptions.disableReasoningParsing),
+						tools: apiOptions.tools as unknown[] | undefined,
+						forceClearSavedKv: afterSummary
+					}
+				);
+			} catch (err) {
+				if (!isAbortError(err)) {
+					console.warn('[WARN] [ChatStore] Pre-encode failed:', err);
+				}
+			} finally {
+				if (this.activePreEncodePromise === runPromise) {
+					this.activePreEncodePromise = null;
+					this.preEncodeAbortController = null;
+					this.preEncodeConvId = null;
+				}
+			}
+		})();
+
+		this.activePreEncodePromise = runPromise;
+		await runPromise;
+	}
+
 	async rebuildConversationMemory(convId: string, forceRebuild = false): Promise<void> {
+		this.cancelPostTurnBackgroundTasks(true);
 		console.log(`[Consolidation] Starting memory rebuild for conversation ${convId} (forceRebuild=${forceRebuild})`);
 
 		const conversation = await DatabaseService.getConversation(convId);
@@ -4160,6 +4424,9 @@ class ChatStore {
 					conversationsStore.activeConversation = updatedConv;
 				}
 				await conversationsStore.updateCurrentNode(currNodeId);
+				if (config().preEncodeConversation !== false) {
+					this.triggerPreEncode(convId, selectedModelName() || null, true).catch(console.error);
+				}
 			}
 
 		} catch (error) {

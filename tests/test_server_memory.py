@@ -448,6 +448,108 @@ class TestServerMemoryAndApi(unittest.TestCase):
         data_unfiltered = res_unfiltered.get_json()
         self.assertEqual(len(data_unfiltered["memories"]), 2)
 
+    def test_14_precache_endpoint_and_kv_slot_handover(self):
+        """非同期KVキャッシュ先読み(is_precache / force_clear_saved_kv)時のRAG非注入・KVスロット引き継ぎ・プロンプト末尾正規化を検証。"""
+        from unittest.mock import MagicMock, patch
+
+        # 1. _strip_trailing_generation_prompt の検証
+        raw_prompt = "<|turn>user\nこんにちは<turn|>\n<|turn>model\n<|channel>thought\n<channel|>応答テスト<turn|>\n<|turn>model\n<|channel>thought\n<channel|>"
+        msgs_assistant_end = [
+            {"role": "user", "content": "こんにちは"},
+            {"role": "assistant", "content": "応答テスト"},
+        ]
+        stripped = server._strip_trailing_generation_prompt(raw_prompt, msgs_assistant_end)
+        self.assertEqual(
+            stripped,
+            "<|turn>user\nこんにちは<turn|>\n<|turn>model\n<|channel>thought\n<channel|>応答テスト<turn|>\n",
+        )
+        msgs_user_end = [{"role": "user", "content": "こんにちは"}]
+        unstripped = server._strip_trailing_generation_prompt(raw_prompt, msgs_user_end)
+        self.assertEqual(unstripped, raw_prompt)
+
+        # 2. is_precache + force_clear_saved_kv リクエスト時の挙動検証
+        sid = "test_precache_session"
+        self.client.post(
+            f"/memory/add?session_id={sid}&message_id=msg_p1",
+            json={"texts": ["先行プリキャッシュ時はRAG注入されない確認用記憶"]},
+            headers=self.headers,
+        )
+
+        # 要約完了直後を模擬して _main_chat_kv_saved = True をセット
+        server._main_chat_kv_saved = True
+        server._main_chat_has_kv = False
+
+        captured_payloads = []
+
+        def fake_post(url, json=None, **kwargs):
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.headers = {"Content-Type": "application/json"}
+            if url.endswith("/v1/chat/completions"):
+                captured_payloads.append(dict(json or {}))
+                mock_resp.content = b'{"choices":[],"timings":{"cache_n":120,"prompt_n":45}}'
+                mock_resp.json.return_value = {"choices": [], "timings": {"cache_n": 120, "prompt_n": 45}}
+                return mock_resp
+            if url.endswith("/apply-template"):
+                mock_resp.json.return_value = {"prompt": stripped}
+                return mock_resp
+            if url.endswith("/tokenize"):
+                mock_resp.json.return_value = {"tokens": [1, 2, 3]}
+                return mock_resp
+            raise AssertionError(f"Unexpected URL called during precache: {url}")
+
+        with patch.object(server._http_session, "post", side_effect=fake_post):
+            res = self.client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "gemma-4",
+                    "messages": [
+                        {"role": "system", "content": "システムプロンプト"},
+                        {"role": "user", "content": "先行プリキャッシュ時はRAG注入されない確認用記憶について"},
+                        {"role": "assistant", "content": "確定したAI応答"},
+                    ],
+                    "n_predict": 0,
+                    "stream": False,
+                    "cache_prompt": True,
+                    "id_slot": 0,
+                    "add_generation_prompt": False,
+                    "is_precache": True,
+                    "force_clear_saved_kv": True,
+                    "session_id": sid,
+                },
+                headers=self.headers,
+            )
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(captured_payloads), 1)
+        forwarded = captured_payloads[0]
+
+        # 内部制御用フィールドは llama-server へ転送されないこと
+        self.assertNotIn("is_precache", forwarded)
+        self.assertNotIn("force_clear_saved_kv", forwarded)
+        self.assertEqual(forwarded.get("add_generation_prompt"), False)
+        self.assertEqual(forwarded.get("n_predict"), 0)
+        self.assertEqual(forwarded.get("id_slot"), 0)
+
+        # is_precache 時は動的RAG（[コンテキスト情報]）が注入されず、末尾に空の user プレースホルダが付与されること
+        forwarded_msgs = forwarded.get("messages", [])
+        for m in forwarded_msgs:
+            self.assertNotIn("[コンテキスト情報]", m.get("content", ""))
+        self.assertEqual(len(forwarded_msgs), 4)
+        self.assertEqual(forwarded_msgs[-1], {"role": "user", "content": ""})
+
+        # _strip_trailing_generation_prompt が空の user プレースホルダ末尾でも <|turn>user\n まで正確に揃えること
+        placeholder_prompt = "<|turn>user\nこんにちは<turn|>\n<|turn>model\n応答テスト<turn|>\n<|turn>user\n<turn|>\n<|turn>model\n<|channel>thought\n<channel|>"
+        stripped_placeholder = server._strip_trailing_generation_prompt(placeholder_prompt, forwarded_msgs)
+        self.assertEqual(
+            stripped_placeholder,
+            "<|turn>user\nこんにちは<turn|>\n<|turn>model\n応答テスト<turn|>\n<|turn>user\n",
+        )
+
+        # force_clear_saved_kv により古い退避フラグが破棄され、スロット0がアクティブ状態に更新されること
+        self.assertFalse(server._main_chat_kv_saved)
+        self.assertTrue(server._main_chat_has_kv)
+
 
 if __name__ == "__main__":
     unittest.main()

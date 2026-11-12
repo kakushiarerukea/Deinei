@@ -23,7 +23,7 @@
     <a href="https://developer.nvidia.com/cuda-zone"><img src="https://img.shields.io/badge/CUDA-13.3%20Supported-76B900?style=flat-square&logo=nvidia" alt="CUDA"></a>
     <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3.10%20(uv)-3776AB?style=flat-square&logo=python" alt="Python"></a>
     <a href="https://svelte.dev"><img src="https://img.shields.io/badge/Frontend-Svelte%205%20%2B%20Tailwind-FF3E00?style=flat-square&logo=svelte" alt="Frontend"></a>
-    <a href="tests/"><img src="https://img.shields.io/badge/Tests-94%20Passed-3fb950?style=flat-square&logo=pytest" alt="Tests"></a>
+    <a href="tests/"><img src="https://img.shields.io/badge/Tests-105%20Passed-3fb950?style=flat-square&logo=pytest" alt="Tests"></a>
   </p>
 
   <!-- Specification Navigation (docs/) -->
@@ -56,7 +56,7 @@
 
 | [Long-Term Memory & RAG] Parent-Child Retrieval | [Avatar] Live2D & 3D VRM Dual Engine |
 | :--- | :--- |
-| • **16-Block Forgetting Sliding**: Compresses every 30 messages into 300–500 token summary blocks.<br>• **Parent-Child Retrieval (ChromaDB)**: Dual-query two-tier search (Fact & Episode) using `ruri-v3-310m`.<br>• **Directed Tree Worldline Isolation**: Branch rewinding and edits prevent memory pollution across parallel branches.<br>• **Dynamic Relative Timestamps**: Injects contextual tags (`[Just now]`, `[3 days ago]`) at inference time. | • **3D VRM Engine (Three.js + three-vrm)**: Procedural breathing, finger relaxation curves, and gaze tracking.<br>• **Live2D Cubism 3/4**: Screen-ratio auto-scaling with GUI touch-zone hitbox editing.<br>• **Intuitive Setup**: Simply drag & drop your `.vrm` file or recommended Live2D ZIP directly onto the screen.<br>• <a href="docs/avatar-and-audio.md#実演デモ動画-なでなでインタラクション表情変化"><b>Demo Video: Headpat interaction & expression changes (MP4)</b></a> |
+| • **16-Block Forgetting Sliding**: Compresses every 30 messages into 300–500 token summary blocks.<br>• **Parent-Child Retrieval (ChromaDB)**: Dual-query two-tier search (Fact & Episode) using `ruri-v3-310m`.<br>• **Directed Tree Worldline Isolation**: Branch rewinding and edits prevent memory pollution (toggleable in Debug panel).<br>• **Dynamic Relative Timestamps**: Injects contextual tags (`[Just now]`, `[3 days ago]`) at inference time. | • **3D VRM Engine (Three.js + three-vrm)**: Procedural breathing, finger relaxation curves, and gaze tracking.<br>• **Live2D Cubism 3/4**: Screen-ratio auto-scaling with GUI touch-zone hitbox editing.<br>• **Intuitive Setup**: Simply drag & drop your `.vrm` file or recommended Live2D ZIP directly onto the screen.<br>• <a href="docs/avatar-and-audio.md#実演デモ動画-なでなでインタラクション表情変化"><b>Demo Video: Headpat interaction & expression changes (MP4)</b></a> |
 
 | [Speech Synthesis] Zero-Shot TTS & Lip-Sync | [Privacy & Access] Local-First & Remote Gateway |
 | :--- | :--- |
@@ -127,7 +127,7 @@ Deinei adopts a layered defense-in-depth architecture consisting of four decoupl
 flowchart TD
     subgraph Client ["1. Client Presentation Layer (WebUI & Dual Avatar)"]
         direction TB
-        BrowserUI["WebUI (Svelte 5 & Tailwind CSS)<br>Dual-Pane Screen / 6-Segment Context Gauge"]
+        BrowserUI["WebUI (Svelte 5 & Tailwind CSS)<br>Dual-Pane Screen / 6-Segment Context Gauge / Bilingual (JA/EN)"]
         TreeDB[("IndexedDB: LlamaUi<br>Directed Tree History / Immutable Snapshots")]
         VRM["VRM 3D Engine (Three.js + three-vrm)<br>Procedural Breathing, Relaxed Fingers, Gaze Tracking"]
         Live2D["Live2D Engine (PixiJS 7.x)<br>Cubism 4 WebGL / Auto-Scale / GUI TouchZones"]
@@ -155,10 +155,10 @@ flowchart TD
         subgraph DeineiServer ["Deinei Backend Server (server.py / Port 5000)"]
             direction TB
             Slide["16-Block Forgetting Sliding<br>Summarize every 30 msgs/7k tokens -> Archive oldest 2 blocks"]
-            ParentChild["Parent-Child RAG Retrieval<br>Dual-Query (Fact 0.865 / Episode 0.85)<br>Top-6 Selection & Local Injection"]
-            Worldline["Directed Tree Worldline Isolation (active_message_ids)<br>Cross-branch memory pollution filter"]
+            ParentChild["Parent-Child RAG Retrieval<br>Dual-Query (Fact 0.865 / Episode 0.85)<br>Top-6 Selection & Local Injection (Max 650 chars/doc)"]
+            Worldline["Directed Tree Worldline Isolation (active_message_ids)<br>Cross-branch memory filter (Toggleable in Debug)"]
             RelativeTime["Relative Time Proxy (ISO Delta)<br>Dynamic tags: [Just now], [3 days ago]"]
-            WebSearch["Autonomous Web Search Pipeline<br>Regex Gate -> Stage 1 LLM -> Stage 2 DDGS / Open-Meteo<br>1-Hour In-Memory Cache"]
+            WebSearch["Autonomous Web Search Pipeline<br>Regex Gate -> Stage 1 LLM -> Stage 2 DDGS / Open-Meteo<br>1-Hour Cache & 5-Hour Ephemeral RAG"]
             STTEngine["STT Speech Recognition (ReazonSpeech-K2)<br>CPU Inference, On-Demand Lazy Load"]
             ChromaDB[("ChromaDB Vector Store<br>Embedding: ruri-v3-310m")]
         end
@@ -185,7 +185,7 @@ flowchart TD
 
     Slide -->|"Evicted Blocks Archive"| ChromaDB
     ParentChild <-->|"Cosine Similarity Query"| ChromaDB
-    Worldline -. "Worldline Filter" .-> ParentChild
+    Worldline -. "Worldline Filter (ON/OFF Toggle)" .-> ParentChild
     RelativeTime -->|"Dynamic Timestamp Tags"| Inference
     ParentChild -->|"Local Pre-Prompt Injection"| Inference
     WebSearch -->|"Search & Weather Data Injection"| Inference
@@ -207,11 +207,11 @@ For complete technical specifications, security models, model download instructi
 | Document | Key Topics |
 | :--- | :--- |
 | **[External Network Specification](docs/external-connections.md)** | All outbound domains, protocols, triggers, and network blocking controls. |
-| **[Memory, RAG & Worldline Isolation](docs/memory-architecture.md)** | 16-block forgetting, parent-child retrieval, relative time proxy, KV cache protection. |
-| **[Live2D, 3D VRM & Audio Synthesis](docs/avatar-and-audio.md)** | WebGL rendering, GUI hitboxes, Irodori-TTS lookahead caching, lip-sync, speech recognition. |
-| **[Smart Web Search & Weather Forecasts](docs/web-search-and-weather.md)** | 2-stage search pipeline, reverse geocoding, Open-Meteo weather integration. |
-| **[Secure Remote Access (LAN / Tailscale)](docs/remote-access.md)** | Gateway architecture, token & cookie authentication, doctor diagnostics. |
-| **[Models & Detailed Setup](docs/models-and-setup.md)** | Recommended GGUF models, Vision encoder setup, VRAM profiles, uninstallation. |
+| **[Memory, RAG & Worldline Isolation](docs/memory-architecture.md)** | 16-block forgetting, parent-child retrieval (max 650 chars), relative time proxy, worldline filter toggle, slot KV preservation, chats/ sync. |
+| **[Live2D, 3D VRM & Audio Synthesis](docs/avatar-and-audio.md)** | WebGL rendering, 60fps avatar throttling, remote access license safeguards, GUI hitboxes, lookahead caching, TTFA latency logging. |
+| **[Smart Web Search & Weather Forecasts](docs/web-search-and-weather.md)** | 2-stage search pipeline, reverse geocoding, Open-Meteo weather integration, ephemeral RAG (5h TTL). |
+| **[Secure Remote Access (LAN / Tailscale)](docs/remote-access.md)** | Gateway architecture, token & cookie authentication, remote Live2D license safeguards (403 block), doctor diagnostics. |
+| **[Models & Detailed Setup](docs/models-and-setup.md)** | First setup wizard, recommended GGUF models, Vision encoder setup, VRAM profiles (dynamic mmap under 24GB RAM), update.bat. |
 
 ---
 
@@ -224,6 +224,7 @@ For complete technical specifications, security models, model download instructi
 5. **Autonomous Summarization Requires Open Browser**: Memory consolidation is driven client-side by the active WebUI tab; closing the browser suspends ongoing summarization until reopened.
 6. **VRM Gaze is Head-Rotation-Centric**: Eye bone limits depend on the specific VRM model file; gaze tracking is expressed primarily through natural head yaw and pitch.
 7. **VRM Idle Animation is Procedural**: Idle stance (relaxed pose + curved fingers + breathing) is computed programmatically via bone measurements rather than static VRMA animations.
+8. **Foreground Rendering Overhead**: When running in a foreground browser window on high refresh-rate monitors (e.g. 240Hz), DWM composition and avatar rendering (60fps) introduce a minor overhead (~1.4ms/tok, ~7–11 TPS difference compared to minimized state).
 
 ---
 
